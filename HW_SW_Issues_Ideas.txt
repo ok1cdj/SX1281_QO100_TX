@@ -1,0 +1,7 @@
+--------------------------------------------------------
+JU - comments to initial PCB revision from 24.08.2021:
+  - PRG and RST pushbuttons too close to each other. Place them more apart to make the handling with fingers easier.
+  - move LD117ADT more to left or right so that we can put there distance pole for OLED display (right hole is OK, left one intersects with LD117ADT)
+  - 78L05 is heating up too much when supplied from 12VCD. Perhaps put 1-2 diodes (2A or more rated) in series before, this will also serve as reverse polarity protection.
+    Make the ground area around 78L05 free, also if possible make several VIAs to bottom GND to ease the heat dissipation
+--------------------------------------------------------
