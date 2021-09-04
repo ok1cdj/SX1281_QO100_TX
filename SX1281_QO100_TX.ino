@@ -34,6 +34,13 @@
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Preferences.h>
+
+//#include <WiFi.h>
+#include "time.h"
+#include <SPI.h>                                               //the lora device is SPI based so load the SPI library                                         
+#include <SX128XLT.h>                                          //include the appropriate library  
+#include "Settings.h"                                          //include the setiings file, frequencies, LoRa settings etc   
 
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -44,64 +51,62 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 
-//#include <WiFi.h>
-#include "time.h"
-#include <SPI.h>                                               //the lora device is SPI based so load the SPI library                                         
-#include <SX128XLT.h>                                          //include the appropriate library  
-#include "Settings.h"                                          //include the setiings file, frequencies, LoRa settings etc   
-
-
-#define Program_Version "QO-100 SX1281 TX V0.1"
-// Pin definitions
-#define ROTARY_ENC_A     26    // Rotary encoder contact A 
-#define ROTARY_ENC_B     27    // Rotary encoder contact B 
-#define ROTARY_ENC_PUSH  25    // Rotary encoder pushbutton
-//
-#define KEYER_DOT       34    // Morse keyer DOT          NOTE: GPIOs 34 to 39 INPUTs only / No internal pullup / No int. pulldown
-#define KEYER_DASH      35    // Morse keyer DASH
-//
-#define TFT_BLACK 0x0000 // black
 
 #define CW_SIDETONE_FREQ  600  // Hz
 
+#define PUSH_BTN_PRESSED 0
 #define WAIT_Push_Btn_Release(milisec)  delay(milisec);while(digitalRead(ROTARY_ENC_PUSH)==0){}
 
 
 // Program state
 enum state_t {
    S_RUN = 0,
+   S_RUN_RUN,
    S_TOP_MENU_ITEMS,
    S_RUN_CQ,
    S_SET_SPEED_WPM,
    S_SET_OUTPUT_POWER,
    S_SET_KEYER_TYPE,
    S_SET_FREQ_OFFSET,
-   S_SET_MY_CALL,
-   S_SET_WIFI_SSID,
-   S_SET_WIFI_PWD,
+   S_SET_TEXT_GENERIC,
    S_WIFI_RECONNECT,
    S_RUN_BEACON
 } program_state;
 
+enum set_text_state_t {
+   S_SET_MY_CALL = 0,
+   S_SET_WIFI_SSID,
+   S_SET_WIFI_PWD
+} set_text_state;
+
+
 //
-//  for($i=-1;$i<13;$i++) { print $i+1 . " "; print 17.58+0.68*$i . " " . 10**((18.26+0.68*$i)/10). "\n"; }
+// for($i=-1;$i<13;$i++) { print $i+1 . " "; print 18.26+0.7*$i . " " . 10**((18.26+0.7*$i)/10). "\n"; }
+// 0 17.56 57.0164272280748
+// 1 18.26 66.9884609416526
+// 2 18.96 78.7045789695099
+// 3 19.66 92.4698173938223
+// 4 20.36 108.642562361707
+// 5 21.06 127.643880881134
+// 6 21.76 149.968483550237
+// 7 22.46 176.197604641163
+// 8 23.16 207.014134879104
+// 9 23.86 243.220400907382
+// 10 24.56 285.759054337495
+// 11 25.26 335.737614242955
+// 12 25.96 394.457302075279
+// 13 26.66 463.446919736288
 //
-const uint32_t PowerArrayMiliWatt [] = {
-  60,   // 0 16.9 57.279603098583
-  70,   // 1 17.58 66.9884609416526
-  80,   // 2 18.26 78.3429642766212
-  90,   // 3 18.94 91.6220490122
-  100,  // 4 19.62 107.151930523761
-  120,  // 5 20.3 125.314117494142
-  150,  // 6 20.98 146.554784095591
-  170,  // 7 21.66 171.395730750843
-  200,  // 8 22.34 200.447202736516
-  230,  // 9 23.02 234.422881531992
-  270,  // 10 23.7 274.157417192788
-  320,  // 11 24.38 320.626932450547
-  370,  // 12 25.06 374.973002245484
-  440  // 13 25.74 438.530697774986
+#define PowerArrayMiliWatt_Size 5
+//
+const uint32_t PowerArrayMiliWatt [][2] = {
+  { 50,  0 },   // cca 50 mW
+  { 100, 4 },   // cca 100 mW
+  { 200, 8 },   // cca 200 mW
+  { 330, 11 },  // cca 300 mW
+  { 450, 13 }   // cca 450 mW
 };
+//
 
 const char * TopMenuArray[] = { 
   "1. Main LoRaCW    ",
@@ -134,23 +139,35 @@ uint8_t  rotaryA_Val = 0xFF;
 uint8_t  rotaryB_Val = 0xFF;
 uint8_t  ISR_cnt = 0;
 uint8_t  cntIncrISR;
+uint32_t loopCnt = 0;
+uint32_t menuIndex;
 uint8_t  keyerVal      = 1;
 uint8_t  pushBtnVal    = 1;
 uint8_t  keyerDotPressed = 0;
 uint8_t  keyerDashPressed = 0;
 uint8_t  keyerCWstarted = 0;
 uint8_t  pushBtnPressed = 0;
-uint32_t menuIndex;
+uint8_t stop = 0;
 
 uint32_t FreqWord = 0;
 uint32_t FreqWordNoOffset = 0;
 uint32_t WPM_dot_delay;
 
-char   freq_ascii_buf[20];
-char   ssid_ascii_buf[32];
-char   ssid_ascii_buf_index = 0;
+char   freq_ascii_buf[20];   // Buffer for formatting of FREQ value
+char   general_ascii_buf[40];
+uint8_t general_ascii_buf_index = 0;
+char   mycall_ascii_buf[40];
+char   wifi_ssid_ascii_buf[40];
+char   wifi_pwd_ascii_buf[40];
 
-char   cq_message_buf[] = "CQ CQ DE OM2JU OM2JU CQ CQ DE OM2JU OM2JU CQ DE OM2JU OM2JU +K";
+String s_mycall_ascii_buf;
+String s_wifi_ssid_ascii_buf;
+String s_wifi_pwd_ascii_buf;
+String s_general_ascii_buf;
+
+
+char   cq_message_buf[] = " CQ CQ DE ";
+char   cq_message_end_buf[] = " +K";
 char   beacon_message_buf[] = "VVV  VVV  VVV  TEST  ";
 
 RotaryEncounters RotaryEnc_FreqWord;
@@ -162,9 +179,7 @@ RotaryEncounters RotaryEnc_OutPowerMiliWatt;
 RotaryEncounters RotaryEnc_TextInput_Char_Index;
 RotaryEncounters RotaryEncISR;
 
-
-//uint8_t cmd_buf[3] = { 0x00, 0x00, 0x00 };
-
+Preferences preferences;
 
 // Copy values of variable pointed by r1 to RotaryEncISR variable
 void RotaryEncPush(RotaryEncounters *r1) {
@@ -178,19 +193,50 @@ void RotaryEncPop(RotaryEncounters *r1) {
 }
 
 
+// Display - Prepare box and cursor for main field
 void display_mainfield_begin() {
   display.setTextColor(WHITE);  
-  display.clearDisplay();
+  //display.clearDisplay();
+  display.fillRect(0,10,SCREEN_WIDTH,35,BLACK);  // x, y, width, height
   display.setTextSize(1);
-  display.setCursor(0, 10);
+  display.setCursor(10, 25);
 }
 
-// TFT prepare cusrsor for value field
+// Display - Prepare box and cursor for value field
 void display_valuefield_begin () {
+  display.fillRect(5,43-2,SCREEN_WIDTH-10,12,WHITE);  // x, y, width, height
+  display.fillRect(6,43-2+1,SCREEN_WIDTH-10-2,12-2,BLACK);  // x, y, width, height
   display.setTextColor(WHITE);  
   display.setTextSize(1);
-  display.setCursor(10, 30);
-  display.fillRect(10,30,90,50,BLACK);
+  display.setCursor(10, 43);
+  //display.fillRect(10,30,90,50,BLACK);
+}
+
+// Display - Clear the valuefield box
+void display_valuefield_clear () {
+  display.fillRect(5,43-2,SCREEN_WIDTH-10,12,BLACK);  // x, y, width, height
+}
+
+// Display - show values on status bar
+void display_status_bar () {
+  display.fillRect(0,SCREEN_HEIGHT-9-9,SCREEN_WIDTH,9+9,WHITE);  // x, y, width, height
+  display.setTextColor(BLACK);  
+  display.setTextSize(1);
+  display.setCursor(1, SCREEN_HEIGHT-8);  // 7 is the font height
+  display.print(s_mycall_ascii_buf);
+  display.setCursor(52, SCREEN_HEIGHT-8);  // 7 is the font height
+  display.print(RotaryEnc_KeyerSpeedWPM.cntVal);
+  display.print("wpm, ");
+  //display.setCursor(40, SCREEN_HEIGHT-7); // 7 is the font height
+  display.print(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][0]);
+  display.print("mW");
+
+  display.setCursor(1, SCREEN_HEIGHT-8-8);  // 7 is the font height
+  display.print("WiFi: ");
+  display.print(s_wifi_ssid_ascii_buf);
+
+  display.display();
+  //... tbd
 }
 
 
@@ -205,6 +251,7 @@ void Calc_WPM_dot_delay ( uint32_t wpm) {
   WPM_dot_delay = (uint32_t) (double(1200.0) / (double) wpm);
 }
 
+// Send CW tone with duration duration_ms 
 void sendCW(uint16_t duration_ms) {
   //digitalWrite(LED1, HIGH);
   ledcWriteTone(3, CW_SIDETONE_FREQ);
@@ -359,35 +406,38 @@ void loop()
    switch (program_state) {
       //--------------------------------
       case S_RUN:
-        //
+        display_valuefield_clear();
+        program_state = S_RUN_RUN;
+      break;
+      //--------------------------------
+      case S_RUN_RUN:
         // Update display with Frequency info when it has changed
         if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
           limitRotaryEncISR_values();
           display_mainfield_begin();
-          
           format_freq(RegWordToFreq(RotaryEncISR.cntVal), freq_ascii_buf);
-
+          //format_freq(RegWordToFreq(RotaryEncISR.cntVal) - 2400000000, freq_ascii_buf);
           //display.println(RegWordToFreq(RotaryEncISR.cntVal),DEC);      
           display.print(freq_ascii_buf);
-          display.display();
-      
+          display.display();      
           JUsetRfFrequency(RegWordToFreq(RotaryEncISR.cntVal), RotaryEnc_OffsetHz.cntVal);  // Offset     
+          display_status_bar();
         }
         //
         RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
         //
         // This has to be at very end since with RotaryEncPush we are making RotaryEncISR.cntValOld different from RotaryEncISR.cntVal
-        if (pushBtnVal == 0) {
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
           WAIT_Push_Btn_Release(200);
           program_state = S_TOP_MENU_ITEMS;
           RotaryEncPop(&RotaryEnc_FreqWord);
           RotaryEncPush(&RotaryEnc_MenuSelection);
         }
         //
-        //delay(5);
       break;
       //--------------------------------
       case S_TOP_MENU_ITEMS:
+        // Wrap aroud
         menuIndex = RotaryEncISR.cntVal % (sizeof(TopMenuArray) / sizeof(TopMenuArray[0]));
         // Update display if there is change
         if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
@@ -397,7 +447,7 @@ void loop()
         }
         RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
         //
-        if (pushBtnVal == 0) {
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
           WAIT_Push_Btn_Release(200);
           RotaryEncPop(&RotaryEnc_MenuSelection);
           switch (menuIndex) {
@@ -435,23 +485,30 @@ void loop()
           break;
           // -----------------------------
           case 6:
-            program_state = S_SET_MY_CALL;
+            program_state  = S_SET_TEXT_GENERIC;
+            set_text_state = S_SET_MY_CALL;
+            s_general_ascii_buf = s_mycall_ascii_buf.substring(0);
             RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
-            snprintf(ssid_ascii_buf, sizeof(ssid_ascii_buf), "OM2JU");
-            //for(int i=0;i<sizeof(ssid_ascii_buf);i++) ssid_ascii_buf[i] = 0;
-            RotaryEncISR.cntVal = ssid_ascii_buf[0];
-            ssid_ascii_buf_index = 0;
+            RotaryEncISR.cntVal = s_general_ascii_buf[0];
+            general_ascii_buf_index = 0;
           break;
           // -----------------------------
           case 7:
-            program_state = S_SET_WIFI_SSID;
+            program_state  = S_SET_TEXT_GENERIC;
+            set_text_state = S_SET_WIFI_SSID;
+            s_general_ascii_buf = s_wifi_ssid_ascii_buf.substring(0);
             RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
-            for(int i=0;i<sizeof(ssid_ascii_buf);i++) ssid_ascii_buf[i] = 0;
-            ssid_ascii_buf_index = 0;
+            RotaryEncISR.cntVal = s_general_ascii_buf[0];
+            general_ascii_buf_index = 0;
           break;
           // -----------------------------
           case 8:
-            program_state = S_SET_WIFI_PWD;
+            program_state  = S_SET_TEXT_GENERIC;
+            set_text_state = S_SET_WIFI_PWD;
+            s_general_ascii_buf = s_wifi_pwd_ascii_buf.substring(0);
+            RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
+            RotaryEncISR.cntVal = s_general_ascii_buf[0];
+            general_ascii_buf_index = 0;
           break;
           // -----------------------------
           case 9:
@@ -473,21 +530,37 @@ void loop()
       break;
       //--------------------------------
       case S_RUN_CQ:
-        //
-        pushBtnPressed=0;
-        //
-        for(int i=0;i<sizeof(cq_message_buf);i++) {
-          morseEncode(cq_message_buf[i]);
-          if (pushBtnVal == 0) break;
+        stop = 0;
+        for(int j=0;(j<3) && !stop;j++) {
+          // CQ
+          for(int i=0;(i<sizeof(cq_message_buf)) && !stop;i++) {
+            morseEncode(cq_message_buf[i]);
+            if (pushBtnVal == PUSH_BTN_PRESSED) { stop++; }
+          }
+          // My Call
+          for(int i=0;(i<s_mycall_ascii_buf.length()) && !stop;i++) {
+            morseEncode(s_mycall_ascii_buf[i]);
+            if (pushBtnVal == PUSH_BTN_PRESSED) { stop++; }
+          }
+          //
+          morseEncode(' ');
+          // My Call
+          for(int i=0;(i<s_mycall_ascii_buf.length()) && !stop;i++) {
+            morseEncode(s_mycall_ascii_buf[i]);
+            if (pushBtnVal == PUSH_BTN_PRESSED) { stop++; }
+          }
+        } // j
+        // +K
+        for(int i=0;(i<sizeof(cq_message_end_buf)) && !stop;i++) {
+          morseEncode(cq_message_end_buf[i]);
+          if (pushBtnVal == PUSH_BTN_PRESSED) { stop++; }
         }
-        //if (pushBtnPressed) {
-          WAIT_Push_Btn_Release(200);
-          RotaryEncPush(&RotaryEnc_FreqWord);
-          display_valuefield_begin();
-          display.print("         ");
-          program_state = S_RUN;
-          display.display();
-        //}        
+        WAIT_Push_Btn_Release(200);
+        RotaryEncPush(&RotaryEnc_FreqWord);
+        //display_valuefield_begin();
+        //display.print("         ");
+        program_state = S_RUN;
+        display.display();
       break;
       //--------------------------------
       case S_SET_SPEED_WPM:
@@ -495,19 +568,19 @@ void loop()
           limitRotaryEncISR_values();
           display_valuefield_begin();
           display.print(RotaryEncISR.cntVal);
-          display.print("   ");
+          //display.print("   ");
           display.display();
-          Calc_WPM_dot_delay(RotaryEncISR.cntVal);
+          Calc_WPM_dot_delay(RotaryEncISR.cntVal);  // this will set the WPM_dot_delay variable
         }
         RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        //
-        if (pushBtnVal == 0) {
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
           WAIT_Push_Btn_Release(200);
+          preferences.putInt("KeyerWPM", RotaryEncISR.cntVal);
           RotaryEncPop(&RotaryEnc_KeyerSpeedWPM);
           RotaryEncPush(&RotaryEnc_FreqWord);
-          display_valuefield_begin();
-          display.print("         ");
-          display.display();
+          //display_valuefield_begin();
+          //display.print("         ");
+          //display.display();
           program_state = S_RUN;
         }        
       break;
@@ -516,22 +589,20 @@ void loop()
         if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
           limitRotaryEncISR_values();
           display_valuefield_begin();
-          RotaryEncISR.cntVal = RotaryEncISR.cntVal % (sizeof(PowerArrayMiliWatt) / sizeof(uint32_t)); // safe
-          display.print(PowerArrayMiliWatt[RotaryEncISR.cntVal]);
+          //RotaryEncISR.cntVal = RotaryEncISR.cntVal % (sizeof(PowerArrayMiliWatt) / sizeof(uint32_t)); // safe
+          RotaryEncISR.cntVal = RotaryEncISR.cntVal % PowerArrayMiliWatt_Size;
+          display.print(PowerArrayMiliWatt[RotaryEncISR.cntVal][0]);
           display.print(" mW    ");
           display.display();
-          LT.setTxParams(RotaryEncISR.cntVal, RADIO_RAMP_10_US);
+          LT.setTxParams(PowerArrayMiliWatt[RotaryEncISR.cntVal][1], RADIO_RAMP_10_US);
         }
         RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        //
-        if (pushBtnVal == 0) {
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
           WAIT_Push_Btn_Release(200);
+          preferences.putInt("OutPower", RotaryEncISR.cntVal);
           RotaryEncPop(&RotaryEnc_OutPowerMiliWatt);
           RotaryEncPush(&RotaryEnc_FreqWord);
-          display_valuefield_begin();
-          display.print("         ");
           program_state = S_RUN;
-          display.display();
         }        
       break;
       //--------------------------------
@@ -543,13 +614,11 @@ void loop()
         }
         RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
         //
-        if (pushBtnVal == 0) {
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
           WAIT_Push_Btn_Release(200);
+          preferences.putInt("KeyerType", RotaryEncISR.cntVal);
           RotaryEncPop(&RotaryEnc_KeyerType);
           RotaryEncPush(&RotaryEnc_FreqWord);
-          display_valuefield_begin();
-          display.print("         ");
-          display.display();
           program_state = S_RUN;
         }        
       break;
@@ -565,56 +634,70 @@ void loop()
         }
         RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
         //
-        if (pushBtnVal == 0) {
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
           WAIT_Push_Btn_Release(200);
+          preferences.putInt("OffsetHz", RotaryEncISR.cntVal);
           RotaryEncPop(&RotaryEnc_OffsetHz);
           RotaryEncPush(&RotaryEnc_FreqWord);
-          display_valuefield_begin();
-          display.print("         ");
-          display.display();
           program_state = S_RUN;
         }        
       break;
       //--------------------------------
-      case S_SET_MY_CALL:
-        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+      case S_SET_TEXT_GENERIC:
+        //if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+          limitRotaryEncISR_values();
+          delay(150);
           display_valuefield_begin();
-          ssid_ascii_buf[ssid_ascii_buf_index] = RotaryEncISR.cntVal;
-          display.print(ssid_ascii_buf);    
-          display.display();      
-        }
+          if (loopCnt % 2) {
+            s_general_ascii_buf[general_ascii_buf_index] = RotaryEncISR.cntVal;
+          } else {
+            s_general_ascii_buf[general_ascii_buf_index] = ' ';
+          }
+          display.print(s_general_ascii_buf);    
+          display.display();
+          // Set it back to valid character after displaying     
+          s_general_ascii_buf[general_ascii_buf_index] = RotaryEncISR.cntVal;
+        //}
         RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
         //
-        if (pushBtnVal == 0) {
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
           WAIT_Push_Btn_Release(200);
-          ssid_ascii_buf_index++;
-          RotaryEncISR.cntVal = ssid_ascii_buf[ssid_ascii_buf_index];
-          limitRotaryEncISR_values();
-          RotaryEncISR.cntValOld = RotaryEncISR.cntVal + 1;   // Force display update in next cycle
-          // 31 = End of string
-          if (RotaryEncISR.cntVal == 31) {
-            ssid_ascii_buf[ssid_ascii_buf_index] = 0;  // Terminate string with null
+          // 127 = End of string
+          if (RotaryEncISR.cntVal == 127) {
+            s_general_ascii_buf[general_ascii_buf_index] = 0;  // Terminate string with null
+            switch (set_text_state) {
+              //---------------------
+              case S_SET_MY_CALL:
+                preferences.putString("MyCall", s_general_ascii_buf);          
+                s_mycall_ascii_buf = s_general_ascii_buf.substring(0); 
+              break;
+              //---------------------
+              case S_SET_WIFI_SSID:
+                preferences.putString("MySSID", s_general_ascii_buf);          
+                s_wifi_ssid_ascii_buf = s_general_ascii_buf.substring(0); 
+              break;
+              //---------------------
+              case S_SET_WIFI_PWD:
+                preferences.putString("MyPWD", s_general_ascii_buf);          
+                s_wifi_pwd_ascii_buf = s_general_ascii_buf.substring(0); 
+              break;
+              //---------------------
+              default:
+              break;
+            }
             RotaryEncPush(&RotaryEnc_FreqWord);
             program_state = S_RUN;
+          } else {
+            general_ascii_buf_index++;
+            if (general_ascii_buf_index >= s_general_ascii_buf.length()) {
+              s_general_ascii_buf+=RotaryEncISR.cntVal;;
+              RotaryEncISR.cntVal = s_general_ascii_buf[general_ascii_buf_index];
+            } else {
+              RotaryEncISR.cntVal = s_general_ascii_buf[general_ascii_buf_index];
+            }
+            RotaryEncISR.cntValOld = RotaryEncISR.cntVal + 1;   // Force display update in next cycle
           }
         }
-      break;
-      //--------------------------------
-      case S_SET_WIFI_SSID:
-        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          display_valuefield_begin();
-          display.print(ssid_ascii_buf);          
-          display.print((char)RotaryEncISR.cntVal);    
-          display.display();      
-        }
-        if (pushBtnVal == 0) {
-          WAIT_Push_Btn_Release(200);
-          ssid_ascii_buf[ssid_ascii_buf_index] = RotaryEncISR.cntVal;
-          ssid_ascii_buf_index++;
-        }
-      break;
-      //--------------------------------
-      case S_SET_WIFI_PWD:
       break;
       //--------------------------------
       case S_WIFI_RECONNECT:
@@ -627,7 +710,7 @@ void loop()
           pushBtnPressed=0;
           for(int i=0;i<sizeof(beacon_message_buf);i++) {
             morseEncode(beacon_message_buf[i]);
-            if (pushBtnVal == 0) { pushBtnPressed=1; break; }
+            if (pushBtnVal == PUSH_BTN_PRESSED) { pushBtnPressed=1; break; }
           }
           if (pushBtnPressed != 0) break;
         }
@@ -644,6 +727,8 @@ void loop()
       default:
       break;
    } // switch program_state
+
+   loopCnt++;
 
 }  // loop
 
@@ -671,7 +756,7 @@ void IRAM_ATTR onTimer() {
       //timeout_cnt = 0;
       rotaryB_Val = digitalRead(ROTARY_ENC_B);
       // Rotation speedup
-      (ISR_cnt <= 10) ? cntIncrISR = RotaryEncISR.cntIncr<<4 : cntIncrISR = RotaryEncISR.cntIncr;
+      (ISR_cnt <= 20) ? cntIncrISR = RotaryEncISR.cntIncr<<4 : cntIncrISR = RotaryEncISR.cntIncr;
       ISR_cnt = 0;
       //
       if (rotaryB_Val == 0) {
@@ -682,25 +767,7 @@ void IRAM_ATTR onTimer() {
          //RotaryEncISR.cntVal = RotaryEncISR.cntVal - cntIncrISR;
       }
    }
-
-   // Rising edge --> 0001
-   /*
-   if (rotaryA_Val == 0x0E) {
-      //timeout_cnt = 0;
-      rotaryB_Val = digitalRead(ROTARY_ENC_B);
-      // Rotation speedup
-      (ISR_cnt <= 5) ? cntIncrISR = 10 : cntIncrISR = 1;
-      ISR_cnt = 0;
-      //
-      if (rotaryB_Val == 0) {
-          Pulse_Cnt -= cntIncrISR;
-         //RotaryEncISR.cntVal = RotaryEncISR.cntVal + cntIncrISR;
-      } else {
-          Pulse_Cnt += cntIncrISR;
-         //RotaryEncISR.cntVal = RotaryEncISR.cntVal - cntIncrISR;
-      }
-   }
-   */
+  
  
 }
 
@@ -715,17 +782,17 @@ void setup() {
   pinMode(KEYER_DASH,      INPUT_PULLUP); 
   pinMode(TCXO_EN, OUTPUT); 
   digitalWrite(TCXO_EN,1);
-  //
- // pinMode(LED1, OUTPUT);                                   //setup pin as output for indicator LED
+  // pinMode(LED1, OUTPUT);                                   //setup pin as output for indicator LED
   //
   // Configure BUZZER functionalities.
   ledcSetup(3, 8000, 8);   //PWM Channel, Freq, Resolution
   /// Attach BUZZER pin.
   ledcAttachPin(BUZZER, 3);  // Pin, Channel
  
+  // Timer for ISR which is processing rotary encoder events
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &onTimer, true);
-  timerAlarmWrite(timer, 2500, true);  // 2500 = 2.5 msec
+  timerAlarmWrite(timer, 3500, true);  // 2500 = 2.5 msec
   timerAlarmEnable(timer);
 
   RotaryEnc_FreqWord.cntVal  = FreqToRegWord(Frequency);
@@ -737,8 +804,27 @@ void setup() {
   RotaryEnc_KeyerSpeedWPM    = {20, 10, 30, 1, 0};
   RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo 
   RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
-  RotaryEnc_OutPowerMiliWatt = {sizeof(PowerArrayMiliWatt)-1, 0, sizeof(PowerArrayMiliWatt)-1, 1, 0};
-  RotaryEnc_TextInput_Char_Index  = {65, 31, 127, 1, 66};
+  RotaryEnc_OutPowerMiliWatt = {PowerArrayMiliWatt_Size-1, 0, PowerArrayMiliWatt_Size-1, 1, 0};
+  RotaryEnc_TextInput_Char_Index  = {65, 33, 127, 1, 66};
+
+
+  // Get configuration values stored in EEPROM/FLASH
+  preferences.begin("my-app", false);   // false = RW mode
+  // Get the counter value, if the key does not exist, return a default value of XY
+  // Note: Key name is limited to 15 chars.
+  RotaryEnc_KeyerSpeedWPM.cntVal    = preferences.getInt("KeyerWPM", 20);
+  RotaryEnc_KeyerType.cntVal        = preferences.getInt("KeyerType", 0);
+  RotaryEnc_OffsetHz.cntVal         = preferences.getInt("OffsetHz", 0);
+  RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower", PowerArrayMiliWatt_Size-1);  // Max output power
+
+  //mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???", 40);
+  //wifi_ssid_ascii_buf               = preferences.getString("MySSID", "SSID???", 40);
+  //wifi_pwd_ascii_buf                = preferences.getString("MyPWD",  "PWD???",  40);
+
+  s_mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???");
+  s_wifi_ssid_ascii_buf               = preferences.getString("MySSID", "??");
+  s_wifi_pwd_ascii_buf                = preferences.getString("MyPWD",  "PWD???");
+
 
   Calc_WPM_dot_delay(RotaryEnc_KeyerSpeedWPM.cntVal);
 
@@ -751,14 +837,13 @@ void setup() {
 
   
   display.clearDisplay();
-  
- // tft.setTextColor(TFT_GOLD,TFT_DARKGREY); 
+  display.fillRect(0,0,SCREEN_WIDTH,9,WHITE);  // x, y, width, height
   display.setTextSize(1);
-  display.setTextColor(WHITE); 
-  display.setCursor(0, 10);
-  display.println(" QO-100 LoRaCW  ");
+  display.setTextColor(BLACK); 
+  display.setCursor(1, 1);
+  display.println(" QO-100 CW TX 2.4GHz");
   display.display();
-  delay(2000);
+  delay(1000);
  
   //led_Flash(2, 125);                                       //two quick LED flashes to indicate program start
 
@@ -783,11 +868,11 @@ void setup() {
   //setup hardware pins used by device, then check if device is found
    if (LT.begin(NSS, NRESET, RFBUSY, DIO1, DIO2, DIO3, RX_EN, TX_EN, LORA_DEVICE))  {
     Serial.println(F("LoRa Device found"));
-    led_Flash(1, 100);
-    delay(125);
-    led_Flash(1, 100*3);
+    led_Flash(1, 50);
+    delay(30);
+    led_Flash(1, 50*3);
     //delay(125);
-    led_Flash(1, 100);
+    led_Flash(1, 50);
   } else {
     Serial.println(F("No device responding"));
     while (1) { led_Flash(50, 50); } //long fast speed LED flash indicates device error 
@@ -830,7 +915,10 @@ void setup() {
 
   Serial.print(F("Transmitter ready"));
   Serial.println();
-  
+
+  LT.setTxParams(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][1], RADIO_RAMP_10_US);
+
+
 }
 
 
@@ -882,4 +970,3 @@ void format_freq(uint32_t n, char *out)
     }
     *--out = 0;
 }
-
