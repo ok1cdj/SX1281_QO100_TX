@@ -42,6 +42,7 @@
 // https://www.esp32.com/viewtopic.php?t=13697 :
 // you can only use GPIO34 and higher as inputs, not outputs 
 
+#define Program_Version "QO-100 TX SX1281 V0.2"
 
 
 #define NSS 5                                  //select pin on LoRa device
@@ -50,7 +51,7 @@
 #define MOSI 23                                 //MOSI on SPI3 
 
 #define NRESET 32                               //reset pin on LoRa device
-#define RFBUSY 12                                //busy line
+#define RFBUSY 16                               //busy line
 
 #define LED1 12                                 //on board LED, high for on
 #define DIO1 13                                 //DIO1 pin on LoRa device, used for RX and TX done 
@@ -63,6 +64,14 @@
 #define LORA_DEVICE DEVICE_SX1281               //we need to define the device we are using
 #define TCXO_EN 14
 
+// Pin definitions
+#define ROTARY_ENC_A     26    // Rotary encoder contact A 
+#define ROTARY_ENC_B     27    // Rotary encoder contact B 
+#define ROTARY_ENC_PUSH  25    // Rotary encoder pushbutton
+//
+#define KEYER_DOT       34    // Morse keyer DOT          NOTE: GPIOs 34 to 39 INPUTs only / No internal pullup / No int. pulldown
+#define KEYER_DASH      35    // Morse keyer DASH
+//
 
 
 //*******  Setup LoRa Parameters Here ! ***************
@@ -70,7 +79,7 @@
 //LoRa Modem Parameters
 //const uint32_t Frequency = 2445000000;          //frequency of transmissions
 const uint32_t Frequency = 2400020000;            //frequency of transmissions
-const int32_t Offset = 80000;                     //offset frequency for calibration purposes  
+const int32_t Offset = 0;                         //offset frequency for calibration purposes  
 //const uint8_t Bandwidth = LORA_BW_0400;         //LoRa bandwidth
 const uint8_t Bandwidth = LORA_BW_0200;           //LoRa bandwidth
 //const uint8_t SpreadingFactor = LORA_SF7;       //LoRa spreading factor
