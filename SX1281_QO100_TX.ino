@@ -51,8 +51,7 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 
-
-#define CW_SIDETONE_FREQ  600  // Hz
+//#define CW_SIDETONE_FREQ  600  // Hz
 
 #define PUSH_BTN_PRESSED 0
 #define WAIT_Push_Btn_Release(milisec)  delay(milisec);while(digitalRead(ROTARY_ENC_PUSH)==0){}
@@ -68,6 +67,7 @@ enum state_t {
    S_SET_OUTPUT_POWER,
    S_SET_KEYER_TYPE,
    S_SET_FREQ_OFFSET,
+   S_SET_BUZZER_FREQ,
    S_SET_TEXT_GENERIC,
    S_WIFI_RECONNECT,
    S_RUN_BEACON
@@ -115,11 +115,12 @@ const char * TopMenuArray[] = {
   "4. Set Out Power  ",
   "5. Set Keyer Typ  ",
   "6. Set Offset Hz  ",
-  "7. Set My Call    ",
-  "8. Set WiFi SSID  ",
-  "9. Set WiFi PWD   ",
-  "10. WiFi Reconn.  ",
-  "11. Beacon (vvv)  "
+  "7. Set Buzzer Freq",
+  "8. Set My Call    ",
+  "9. Set WiFi SSID  ",
+  "10. Set WiFi PWD  ",
+  "11. WiFi Reconn.  ",
+  "12. Beacon (vvv)  "
  };
 
 struct RotaryEncounters
@@ -141,6 +142,7 @@ uint8_t  ISR_cnt = 0;
 uint8_t  cntIncrISR;
 uint32_t loopCnt = 0;
 uint32_t menuIndex;
+uint32_t timeout_cnt = 0;
 uint8_t  keyerVal      = 1;
 uint8_t  pushBtnVal    = 1;
 uint8_t  keyerDotPressed = 0;
@@ -175,6 +177,7 @@ RotaryEncounters RotaryEnc_MenuSelection;
 RotaryEncounters RotaryEnc_KeyerSpeedWPM;
 RotaryEncounters RotaryEnc_KeyerType;
 RotaryEncounters RotaryEnc_OffsetHz;
+RotaryEncounters RotaryEnc_BuzzerFreq;
 RotaryEncounters RotaryEnc_OutPowerMiliWatt;
 RotaryEncounters RotaryEnc_TextInput_Char_Index;
 RotaryEncounters RotaryEncISR;
@@ -194,12 +197,12 @@ void RotaryEncPop(RotaryEncounters *r1) {
 
 
 // Display - Prepare box and cursor for main field
-void display_mainfield_begin() {
+void display_mainfield_begin(uint8_t x) {
   display.setTextColor(WHITE);  
   //display.clearDisplay();
-  display.fillRect(0,10,SCREEN_WIDTH,35,BLACK);  // x, y, width, height
+  display.fillRect(1,10,SCREEN_WIDTH-2,35,BLACK);  // x, y, width, height
   display.setTextSize(1);
-  display.setCursor(10, 25);
+  display.setCursor(x, 25);
 }
 
 // Display - Prepare box and cursor for value field
@@ -208,7 +211,7 @@ void display_valuefield_begin () {
   display.fillRect(6,43-2+1,SCREEN_WIDTH-10-2,12-2,BLACK);  // x, y, width, height
   display.setTextColor(WHITE);  
   display.setTextSize(1);
-  display.setCursor(10, 43);
+  display.setCursor(20, 43);
   //display.fillRect(10,30,90,50,BLACK);
 }
 
@@ -219,14 +222,19 @@ void display_valuefield_clear () {
 
 // Display - show values on status bar
 void display_status_bar () {
+  // Delete old info by drawing rectangle
   display.fillRect(0,SCREEN_HEIGHT-9-9,SCREEN_WIDTH,9+9,WHITE);  // x, y, width, height
   display.setTextColor(BLACK);  
   display.setTextSize(1);
   display.setCursor(1, SCREEN_HEIGHT-8);  // 7 is the font height
   display.print(s_mycall_ascii_buf);
   display.setCursor(52, SCREEN_HEIGHT-8);  // 7 is the font height
-  display.print(RotaryEnc_KeyerSpeedWPM.cntVal);
-  display.print("wpm, ");
+  if (RotaryEnc_KeyerType.cntVal & 0x00000001) {
+    display.print("Manual,");
+  } else {
+    display.print(RotaryEnc_KeyerSpeedWPM.cntVal);
+    display.print("wpm, ");
+  }
   //display.setCursor(40, SCREEN_HEIGHT-7); // 7 is the font height
   display.print(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][0]);
   display.print("mW");
@@ -254,7 +262,7 @@ void Calc_WPM_dot_delay ( uint32_t wpm) {
 // Send CW tone with duration duration_ms 
 void sendCW(uint16_t duration_ms) {
   //digitalWrite(LED1, HIGH);
-  ledcWriteTone(3, CW_SIDETONE_FREQ);
+  ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
   LT.writeCommand(RADIO_SET_FS, 0, 0);
   LT.txEnable();
   LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
@@ -277,7 +285,7 @@ void sendCW(uint16_t duration_ms) {
 // Start CW - from FS to TX mode
 void startCW() {
   //digitalWrite(LED1, HIGH);
-  ledcWriteTone(3, CW_SIDETONE_FREQ);
+  ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
 //  LT.writeCommand(RADIO_SET_FS, 0, 0);
 //  LT.txEnable();
   LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
@@ -299,7 +307,7 @@ void led_Flash(uint16_t flashes, uint16_t delaymS)
   for (index = 1; index <= flashes; index++)
   {
     //digitalWrite(LED1, HIGH);
-    ledcWriteTone(3, CW_SIDETONE_FREQ);
+    ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
     delay(delaymS);
     ledcWriteTone(3, 0);
     digitalWrite(LED1, LOW);
@@ -402,6 +410,21 @@ void loop()
        delay(WPM_dot_delay);
      }
    }
+   // Process timeout for display items other than main screen
+   if (program_state != S_RUN_RUN) {
+     timeout_cnt++;
+     if (timeout_cnt > 4000) {
+       display_valuefield_clear();
+       display_valuefield_begin();
+       display.print("Timeout...");
+       display.display();
+       delay(600);
+       timeout_cnt=0;
+       RotaryEncPush(&RotaryEnc_FreqWord);
+       program_state = S_RUN;
+     }
+   }
+   // Main FSM
    //-----------------------------------------
    switch (program_state) {
       //--------------------------------
@@ -414,7 +437,7 @@ void loop()
         // Update display with Frequency info when it has changed
         if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
           limitRotaryEncISR_values();
-          display_mainfield_begin();
+          display_mainfield_begin(23);
           format_freq(RegWordToFreq(RotaryEncISR.cntVal), freq_ascii_buf);
           //format_freq(RegWordToFreq(RotaryEncISR.cntVal) - 2400000000, freq_ascii_buf);
           //display.println(RegWordToFreq(RotaryEncISR.cntVal),DEC);      
@@ -441,7 +464,8 @@ void loop()
         menuIndex = RotaryEncISR.cntVal % (sizeof(TopMenuArray) / sizeof(TopMenuArray[0]));
         // Update display if there is change
         if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          display_mainfield_begin();
+          timeout_cnt=0;
+          display_mainfield_begin(10);
           display.print(TopMenuArray[menuIndex]);
           display.display();
         }
@@ -485,6 +509,11 @@ void loop()
           break;
           // -----------------------------
           case 6:
+            program_state = S_SET_BUZZER_FREQ;
+            RotaryEncPush(&RotaryEnc_BuzzerFreq); // makes RotaryEncISR.cntValOld different from RotaryEncISR.cntVal  ==> forces display update
+          break;
+          // -----------------------------
+          case 7:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_MY_CALL;
             s_general_ascii_buf = s_mycall_ascii_buf.substring(0);
@@ -493,7 +522,7 @@ void loop()
             general_ascii_buf_index = 0;
           break;
           // -----------------------------
-          case 7:
+          case 8:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_WIFI_SSID;
             s_general_ascii_buf = s_wifi_ssid_ascii_buf.substring(0);
@@ -502,7 +531,7 @@ void loop()
             general_ascii_buf_index = 0;
           break;
           // -----------------------------
-          case 8:
+          case 9:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_WIFI_PWD;
             s_general_ascii_buf = s_wifi_pwd_ascii_buf.substring(0);
@@ -511,11 +540,11 @@ void loop()
             general_ascii_buf_index = 0;
           break;
           // -----------------------------
-          case 9:
+          case 10:
             program_state = S_WIFI_RECONNECT;
           break;
           // -----------------------------
-          case 10:
+          case 11:
             program_state = S_RUN_BEACON;
             display_valuefield_begin();
             display.print("BEACON...");
@@ -531,6 +560,7 @@ void loop()
       //--------------------------------
       case S_RUN_CQ:
         stop = 0;
+        timeout_cnt=0;   // do not allow to timeout this operation
         for(int j=0;(j<3) && !stop;j++) {
           // CQ
           for(int i=0;(i<sizeof(cq_message_buf)) && !stop;i++) {
@@ -557,18 +587,16 @@ void loop()
         }
         WAIT_Push_Btn_Release(200);
         RotaryEncPush(&RotaryEnc_FreqWord);
-        //display_valuefield_begin();
-        //display.print("         ");
         program_state = S_RUN;
         display.display();
       break;
       //--------------------------------
       case S_SET_SPEED_WPM:
         if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+          timeout_cnt=0;
           limitRotaryEncISR_values();
           display_valuefield_begin();
           display.print(RotaryEncISR.cntVal);
-          //display.print("   ");
           display.display();
           Calc_WPM_dot_delay(RotaryEncISR.cntVal);  // this will set the WPM_dot_delay variable
         }
@@ -578,15 +606,13 @@ void loop()
           preferences.putInt("KeyerWPM", RotaryEncISR.cntVal);
           RotaryEncPop(&RotaryEnc_KeyerSpeedWPM);
           RotaryEncPush(&RotaryEnc_FreqWord);
-          //display_valuefield_begin();
-          //display.print("         ");
-          //display.display();
           program_state = S_RUN;
         }        
       break;
       //--------------------------------
       case S_SET_OUTPUT_POWER:
         if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+          timeout_cnt=0;
           limitRotaryEncISR_values();
           display_valuefield_begin();
           //RotaryEncISR.cntVal = RotaryEncISR.cntVal % (sizeof(PowerArrayMiliWatt) / sizeof(uint32_t)); // safe
@@ -608,6 +634,7 @@ void loop()
       //--------------------------------
       case S_SET_KEYER_TYPE:
         if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+          timeout_cnt=0;
           display_valuefield_begin();
           display.print(RotaryEncISR.cntVal%2 ?  "Straight  " : "Iambic    ");
           display.display();
@@ -625,11 +652,11 @@ void loop()
       //--------------------------------
       case S_SET_FREQ_OFFSET:
         if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+          timeout_cnt=0;
           limitRotaryEncISR_values();
           JUsetRfFrequency(RegWordToFreq(RotaryEncISR.cntVal), RotaryEncISR.cntVal);  // Offset     
           display_valuefield_begin();
           display.print(RotaryEncISR.cntVal);
-          display.print("   ");
           display.display();
         }
         RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
@@ -642,11 +669,34 @@ void loop()
           program_state = S_RUN;
         }        
       break;
+
+      //--------------------------------
+      case S_SET_BUZZER_FREQ:
+        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+          timeout_cnt=0;
+          display_valuefield_begin();
+          display.print(RotaryEncISR.cntVal);
+          display.display();
+          ledcWriteTone(3, RotaryEncISR.cntVal);
+          delay(100);
+          ledcWriteTone(3, 0);
+        }
+        RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+        //
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
+          WAIT_Push_Btn_Release(200);
+          preferences.putInt("BuzzerFreq", RotaryEncISR.cntVal);
+          RotaryEncPop(&RotaryEnc_BuzzerFreq);
+          RotaryEncPush(&RotaryEnc_FreqWord);
+          program_state = S_RUN;
+        }        
+      break;
       //--------------------------------
       case S_SET_TEXT_GENERIC:
         //if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
           limitRotaryEncISR_values();
           delay(150);
+          timeout_cnt += 15;  // accelerate timeout_cnt since we have delay here
           display_valuefield_begin();
           if (loopCnt % 2) {
             s_general_ascii_buf[general_ascii_buf_index] = RotaryEncISR.cntVal;
@@ -661,6 +711,7 @@ void loop()
         RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
         //
         if (pushBtnVal == PUSH_BTN_PRESSED) {
+          timeout_cnt=0;
           WAIT_Push_Btn_Release(200);
           // 127 = End of string
           if (RotaryEncISR.cntVal == 127) {
@@ -705,7 +756,7 @@ void loop()
       //--------------------------------
       case S_RUN_BEACON:
         //
-        //
+        timeout_cnt=0;  // do not allow to timeout this operation
         for(int j=0;j<10;j++) {
           pushBtnPressed=0;
           for(int i=0;i<sizeof(beacon_message_buf);i++) {
@@ -718,7 +769,6 @@ void loop()
           WAIT_Push_Btn_Release(200);
           RotaryEncPush(&RotaryEnc_FreqWord);
           display_valuefield_begin();
-          display.print("         ");
           display.display();  
           program_state = S_RUN;
         //}        
@@ -739,7 +789,6 @@ void IRAM_ATTR onTimer() {
   //digitalWrite(LED_PIN,LEDtoggle);
   //LEDtoggle = !LEDtoggle;  
   //portEXIT_CRITICAL_ISR(&timerMux);
-
 
    uint32_t incr_val;
    //
@@ -804,6 +853,7 @@ void setup() {
   RotaryEnc_KeyerSpeedWPM    = {20, 10, 30, 1, 0};
   RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo 
   RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
+  RotaryEnc_BuzzerFreq       = {600, 0, 2000, 100, 0};
   RotaryEnc_OutPowerMiliWatt = {PowerArrayMiliWatt_Size-1, 0, PowerArrayMiliWatt_Size-1, 1, 0};
   RotaryEnc_TextInput_Char_Index  = {65, 33, 127, 1, 66};
 
@@ -815,6 +865,7 @@ void setup() {
   RotaryEnc_KeyerSpeedWPM.cntVal    = preferences.getInt("KeyerWPM", 20);
   RotaryEnc_KeyerType.cntVal        = preferences.getInt("KeyerType", 0);
   RotaryEnc_OffsetHz.cntVal         = preferences.getInt("OffsetHz", 0);
+  RotaryEnc_BuzzerFreq.cntVal       = preferences.getInt("BuzzerFreq", 600);
   RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower", PowerArrayMiliWatt_Size-1);  // Max output power
 
   //mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???", 40);
@@ -822,7 +873,7 @@ void setup() {
   //wifi_pwd_ascii_buf                = preferences.getString("MyPWD",  "PWD???",  40);
 
   s_mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???");
-  s_wifi_ssid_ascii_buf               = preferences.getString("MySSID", "??");
+  s_wifi_ssid_ascii_buf               = preferences.getString("MySSID", "SSID??");
   s_wifi_pwd_ascii_buf                = preferences.getString("MyPWD",  "PWD???");
 
 
@@ -842,8 +893,10 @@ void setup() {
   display.setTextColor(BLACK); 
   display.setCursor(1, 1);
   display.println(" QO-100 CW TX 2.4GHz");
+  display.drawFastVLine(0,0,SCREEN_HEIGHT,WHITE);
+  display.drawFastVLine(SCREEN_WIDTH-1,0,SCREEN_HEIGHT,WHITE);
   display.display();
-  delay(1000);
+  delay(200);
  
   //led_Flash(2, 125);                                       //two quick LED flashes to indicate program start
 
