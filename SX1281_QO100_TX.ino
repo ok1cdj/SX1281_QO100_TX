@@ -36,12 +36,19 @@
 #include <Adafruit_SSD1306.h>
 #include <Preferences.h>
 
-//#include <WiFi.h>
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncUDP.h>
+#include <SPIFFS.h>
+
+
 #include "time.h"
 #include <SPI.h>                                               //the lora device is SPI based so load the SPI library                                         
 #include <SX128XLT.h>                                          //include the appropriate library  
 #include "Settings.h"                                          //include the setiings file, frequencies, LoRa settings etc   
 
+
+#define UDP_PORT 6789 // UDP port for CW 
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -56,27 +63,68 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define PUSH_BTN_PRESSED 0
 #define WAIT_Push_Btn_Release(milisec)  delay(milisec);while(digitalRead(ROTARY_ENC_PUSH)==0){}
 
+// Webserver
+
+AsyncWebServer server(80);
+AsyncUDP udp;
+
+String ssid       = "";
+String password   = "";
+String apikey     = "";
+String sIP        = "";
+String sGateway   = "";
+String sSubnet    = "";
+String sPrimaryDNS = "";
+String sSecondaryDNS = "";
+
+
+
+// web server requests
+const char* PARAM_MESSAGE = "message";
+const char* PARAM_SPEED = "speed";
+const char* PARAM_SSID = "ssid";
+const char* PARAM_PASSWORD = "password";
+const char* PARAM_APIKEY = "apikey";
+const char* PARAM_DHCP = "dhcp";
+const char* PARAM_CON = "con";
+const char* PARAM_SUBNET = "subnet";
+const char* PARAM_GATEWAY = "gateway";
+const char* PARAM_PDNS = "pdns";
+const char* PARAM_SDNS = "sdns";
+const char* PARAM_LOCALIP = "localip";
+
+
+bool wifiConfigRequired = false;
+bool dhcp = true; // dhcp enable disble
+bool con = false; // connection type wifi false
+
+IPAddress IP;
+IPAddress gateway;
+IPAddress subnet;
+IPAddress primaryDNS;
+IPAddress secondaryDNS;
+
 
 // Program state
 enum state_t {
-   S_RUN = 0,
-   S_RUN_RUN,
-   S_TOP_MENU_ITEMS,
-   S_RUN_CQ,
-   S_SET_SPEED_WPM,
-   S_SET_OUTPUT_POWER,
-   S_SET_KEYER_TYPE,
-   S_SET_FREQ_OFFSET,
-   S_SET_BUZZER_FREQ,
-   S_SET_TEXT_GENERIC,
-   S_WIFI_RECONNECT,
-   S_RUN_BEACON
+  S_RUN = 0,
+  S_RUN_RUN,
+  S_TOP_MENU_ITEMS,
+  S_RUN_CQ,
+  S_SET_SPEED_WPM,
+  S_SET_OUTPUT_POWER,
+  S_SET_KEYER_TYPE,
+  S_SET_FREQ_OFFSET,
+  S_SET_BUZZER_FREQ,
+  S_SET_TEXT_GENERIC,
+  S_WIFI_RECONNECT,
+  S_RUN_BEACON
 } program_state;
 
 enum set_text_state_t {
-   S_SET_MY_CALL = 0,
-   S_SET_WIFI_SSID,
-   S_SET_WIFI_PWD
+  S_SET_MY_CALL = 0,
+  S_SET_WIFI_SSID,
+  S_SET_WIFI_PWD
 } set_text_state;
 
 
@@ -108,7 +156,7 @@ const uint32_t PowerArrayMiliWatt [][2] = {
 };
 //
 
-const char * TopMenuArray[] = { 
+const char * TopMenuArray[] = {
   "1. Main LoRaCW    ",
   "2. CQ...          ",
   "3. Set WPM        ",
@@ -121,15 +169,15 @@ const char * TopMenuArray[] = {
   "10. Set WiFi PWD  ",
   "11. WiFi Reconn.  ",
   "12. Beacon (vvv)  "
- };
+};
 
 struct RotaryEncounters
 {
-   int32_t cntVal;
-   int32_t cntMin;
-   int32_t cntMax;
-   int32_t cntIncr;
-   int32_t cntValOld;
+  int32_t cntVal;
+  int32_t cntMin;
+  int32_t cntMax;
+  int32_t cntIncr;
+  int32_t cntValOld;
 };
 
 hw_timer_t * timer = NULL;
@@ -186,30 +234,30 @@ Preferences preferences;
 
 // Copy values of variable pointed by r1 to RotaryEncISR variable
 void RotaryEncPush(RotaryEncounters *r1) {
-   RotaryEncISR = *r1;
-   RotaryEncISR.cntValOld = RotaryEncISR.cntVal + 1;  // Make Old value different from actual in order to e.g. force initial update of display
+  RotaryEncISR = *r1;
+  RotaryEncISR.cntValOld = RotaryEncISR.cntVal + 1;  // Make Old value different from actual in order to e.g. force initial update of display
 }
 
 // Copy values of RotaryEncISR variable to variable pointed by r1
 void RotaryEncPop(RotaryEncounters *r1) {
-   *r1 = RotaryEncISR;
+  *r1 = RotaryEncISR;
 }
 
 
 // Display - Prepare box and cursor for main field
 void display_mainfield_begin(uint8_t x) {
-  display.setTextColor(WHITE);  
+  display.setTextColor(WHITE);
   //display.clearDisplay();
-  display.fillRect(1,10,SCREEN_WIDTH-2,35,BLACK);  // x, y, width, height
+  display.fillRect(1, 10, SCREEN_WIDTH - 2, 35, BLACK); // x, y, width, height
   display.setTextSize(1);
   display.setCursor(x, 25);
 }
 
 // Display - Prepare box and cursor for value field
 void display_valuefield_begin () {
-  display.fillRect(5,43-2,SCREEN_WIDTH-10,12,WHITE);  // x, y, width, height
-  display.fillRect(6,43-2+1,SCREEN_WIDTH-10-2,12-2,BLACK);  // x, y, width, height
-  display.setTextColor(WHITE);  
+  display.fillRect(5, 43 - 2, SCREEN_WIDTH - 10, 12, WHITE); // x, y, width, height
+  display.fillRect(6, 43 - 2 + 1, SCREEN_WIDTH - 10 - 2, 12 - 2, BLACK); // x, y, width, height
+  display.setTextColor(WHITE);
   display.setTextSize(1);
   display.setCursor(20, 43);
   //display.fillRect(10,30,90,50,BLACK);
@@ -217,18 +265,18 @@ void display_valuefield_begin () {
 
 // Display - Clear the valuefield box
 void display_valuefield_clear () {
-  display.fillRect(5,43-2,SCREEN_WIDTH-10,12,BLACK);  // x, y, width, height
+  display.fillRect(5, 43 - 2, SCREEN_WIDTH - 10, 12, BLACK); // x, y, width, height
 }
 
 // Display - show values on status bar
 void display_status_bar () {
   // Delete old info by drawing rectangle
-  display.fillRect(0,SCREEN_HEIGHT-9-9,SCREEN_WIDTH,9+9,WHITE);  // x, y, width, height
-  display.setTextColor(BLACK);  
+  display.fillRect(0, SCREEN_HEIGHT - 9 - 9, SCREEN_WIDTH, 9 + 9, WHITE); // x, y, width, height
+  display.setTextColor(BLACK);
   display.setTextSize(1);
-  display.setCursor(1, SCREEN_HEIGHT-8);  // 7 is the font height
+  display.setCursor(1, SCREEN_HEIGHT - 8); // 7 is the font height
   display.print(s_mycall_ascii_buf);
-  display.setCursor(52, SCREEN_HEIGHT-8);  // 7 is the font height
+  display.setCursor(52, SCREEN_HEIGHT - 8); // 7 is the font height
   if (RotaryEnc_KeyerType.cntVal & 0x00000001) {
     display.print("Manual,");
   } else {
@@ -239,7 +287,7 @@ void display_status_bar () {
   display.print(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][0]);
   display.print("mW");
 
-  display.setCursor(1, SCREEN_HEIGHT-8-8);  // 7 is the font height
+  display.setCursor(1, SCREEN_HEIGHT - 8 - 8); // 7 is the font height
   display.print("WiFi: ");
   display.print(s_wifi_ssid_ascii_buf);
 
@@ -250,8 +298,12 @@ void display_status_bar () {
 
 // Limit values of RotaryEncISR.cntVal
 void limitRotaryEncISR_values() {
- if (RotaryEncISR.cntVal >= RotaryEncISR.cntMax) { RotaryEncISR.cntVal = RotaryEncISR.cntMax; }
- if (RotaryEncISR.cntVal <= RotaryEncISR.cntMin) { RotaryEncISR.cntVal = RotaryEncISR.cntMin; }
+  if (RotaryEncISR.cntVal >= RotaryEncISR.cntMax) {
+    RotaryEncISR.cntVal = RotaryEncISR.cntMax;
+  }
+  if (RotaryEncISR.cntVal <= RotaryEncISR.cntMin) {
+    RotaryEncISR.cntVal = RotaryEncISR.cntMin;
+  }
 }
 
 // Calculate duration of DOT from WPM
@@ -259,7 +311,7 @@ void Calc_WPM_dot_delay ( uint32_t wpm) {
   WPM_dot_delay = (uint32_t) (double(1200.0) / (double) wpm);
 }
 
-// Send CW tone with duration duration_ms 
+// Send CW tone with duration duration_ms
 void sendCW(uint16_t duration_ms) {
   //digitalWrite(LED1, HIGH);
   ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
@@ -286,8 +338,8 @@ void sendCW(uint16_t duration_ms) {
 void startCW() {
   //digitalWrite(LED1, HIGH);
   ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
-//  LT.writeCommand(RADIO_SET_FS, 0, 0);
-//  LT.txEnable();
+  //  LT.writeCommand(RADIO_SET_FS, 0, 0);
+  //  LT.txEnable();
   LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
 }
 
@@ -318,200 +370,273 @@ void led_Flash(uint16_t flashes, uint16_t delaymS)
 //-----------------------------------------------------------------------------
 // Encoding a character to Morse code and playing it
 void morseEncode ( unsigned char rxd ) {
-	uint8_t i, j, m, mask, morse_len;
+  uint8_t i, j, m, mask, morse_len;
 
-	if (rxd >= 97 && rxd < 123) {		// > 'a' && < 'z'
-	  rxd = rxd - 32;					// make the character uppercase
-	}
-	//
-	if ((rxd < 97) && (rxd > 12)) {		// above 96 no valid Morse characters
-	  m   = Morse_Coding_table[rxd-32];
+  if (rxd >= 97 && rxd < 123) {		// > 'a' && < 'z'
+    rxd = rxd - 32;					// make the character uppercase
+  }
+  //
+  if ((rxd < 97) && (rxd > 12)) {		// above 96 no valid Morse characters
+    m   = Morse_Coding_table[rxd - 32];
     morse_len = (m >> 5) & 0x07;
     mask = 0x10;
-	  if (morse_len >= 6) { 
-		  morse_len = 6;
+    if (morse_len >= 6) {
+      morse_len = 6;
       mask = 0x20;
-	  }
-	  //
-	  for (i=0;i<morse_len;i++) {
-    startCW();
-		if ((m & mask) > 0x00) { // Dash
+    }
+    //
+    for (i = 0; i < morse_len; i++) {
+      startCW();
+      if ((m & mask) > 0x00) { // Dash
+        delay(WPM_dot_delay);
+        delay(WPM_dot_delay);
+        delay(WPM_dot_delay);
+      } else { // Dot
+        delay(WPM_dot_delay);
+      }
+      stopCW();
+      // Dot-wait between played dot/dash
       delay(WPM_dot_delay);
-      delay(WPM_dot_delay);
-      delay(WPM_dot_delay);
-		} else { // Dot
-      delay(WPM_dot_delay);
-		}
-    stopCW();
-		// Dot-wait between played dot/dash 
-    delay(WPM_dot_delay);
-		mask = mask >> 1;
-	  } //end for(i=0...
-	  // Dash-wait between characters
+      mask = mask >> 1;
+    } //end for(i=0...
+    // Dash-wait between characters
     delay(WPM_dot_delay);
     delay(WPM_dot_delay);
     delay(WPM_dot_delay);
-	  //
-	} //if (rxd < 97...
+    //
+  } //if (rxd < 97...
 }
 
 
+void notFound(AsyncWebServerRequest *request) {
+  request->send(404, "text/plain", "Not found");
+}
+
+// process replacement in html pages
+String processor(const String& var) {
+  if (var == "SPEED") {
+    //return sspeed;
+  }
+  if (var == "NETWORKS" ) {
+    String rsp;
+    int n = WiFi.scanNetworks();
+    for (int i = 0; i < n; ++i) {
+      rsp += "<option value=\"" + WiFi.SSID(i) + "\">" + WiFi.SSID(i) + " (RSSI: " + WiFi.RSSI(i) + ")</option>";
+    }
+    return rsp;
+  }
+
+
+  if (var == "APIKEY") {
+    return apikey;
+  }
+
+if (var == "DHCP") {
+
+  String rsp = "";
+  if (dhcp) rsp = "checked";
+
+  return  rsp;
+}
+
+
+if (var == "LOCALIP") {
+  return sIP;
+}
+if (var == "SUBNET") {
+  return sSubnet;
+}
+
+if (var == "GATEWAY") {
+  return sGateway;
+}
+
+if (var == "PDNS") {
+  return sPrimaryDNS;
+}
+if (var == "SDNS") {
+  return sSecondaryDNS;
+}
+
+return String();
+}
+
+void savePrefs()
+{
+  preferences.begin("my-app", false);
+  preferences.putString("ssid", ssid);
+  preferences.putString("password", password);
+  preferences.putString("apikey", apikey);
+  preferences.putBool("dhcp", dhcp);
+  preferences.putBool("con", con);
+  preferences.getString("ip", sIP);
+  preferences.getString("gateway", sGateway);
+  preferences.getString("subnet", sSubnet);
+  preferences.getString("pdns", sPrimaryDNS);
+  preferences.getString("sdns", sSecondaryDNS);
+
+  preferences.end();
+
+}
+
 void loop()
 {
-   // Some debug
-   /*
-   Serial.print("-- ");
-   Serial.print(program_state);
-   Serial.print(" ");
-   Serial.print(RotaryEncISR.cntVal);
-   Serial.print(" ");
-   //Serial.print(cntValOld);
-   Serial.println("");
-   */
-   //delay(150);
+  // Some debug
+  /*
+    Serial.print("-- ");
+    Serial.print(program_state);
+    Serial.print(" ");
+    Serial.print(RotaryEncISR.cntVal);
+    Serial.print(" ");
+    //Serial.print(cntValOld);
+    Serial.println("");
+  */
+  //delay(150);
 
-   //-----------------------------------------
-   // -- Straight keyer
-   if (RotaryEnc_KeyerType.cntVal & 0x00000001) {
-     // Keyer pressed
-     if ((keyerVal&0x01) == 0)  { 
-       if (keyerCWstarted == 0) {
-         startCW();
-       }
-       keyerCWstarted = 1;         
-       delay(10);
-     }
-     // Keyer released
-     if ((keyerVal&0x01) == 1) { 
-       keyerCWstarted = 0;         
-       stopCW();
-       delay(10);
-     }
-   } else {
-     // -- Iambic keywer
-     // Keyer pressed DOT
-     if (((keyerVal&0x01) == 0) || (keyerDotPressed == 1)) {
-       startCW();
-       delay(WPM_dot_delay);
-       ((keyerVal&0x01) == 0) ? keyerDotPressed  = 1 : keyerDotPressed = 0;
-       ((keyerVal&0x02) == 0) ? keyerDashPressed = 1 : keyerDashPressed = 0;
-       stopCW();
-       delay(WPM_dot_delay);
-     }
-     // Keyer pressed DASH
-     if (((keyerVal&0x02) == 0) || (keyerDashPressed == 1)) {
-       startCW();
-       delay(WPM_dot_delay);
-       delay(WPM_dot_delay);
-       ((keyerVal&0x01) == 0) ? keyerDotPressed  = 1 : keyerDotPressed = 0;
-       ((keyerVal&0x02) == 0) ? keyerDashPressed = 1 : keyerDashPressed = 0;
-       delay(WPM_dot_delay);
-       stopCW();
-       delay(WPM_dot_delay);
-     }
-   }
-   // Process timeout for display items other than main screen
-   if (program_state != S_RUN_RUN) {
-     timeout_cnt++;
-     if (timeout_cnt > 4000) {
-       display_valuefield_clear();
-       display_valuefield_begin();
-       display.print("Timeout...");
-       display.display();
-       delay(600);
-       timeout_cnt=0;
-       RotaryEncPush(&RotaryEnc_FreqWord);
-       program_state = S_RUN;
-     }
-   }
-   // Main FSM
-   //-----------------------------------------
-   switch (program_state) {
-      //--------------------------------
-      case S_RUN:
-        display_valuefield_clear();
-        program_state = S_RUN_RUN;
+  //-----------------------------------------
+  // -- Straight keyer
+  if (RotaryEnc_KeyerType.cntVal & 0x00000001) {
+    // Keyer pressed
+    if ((keyerVal & 0x01) == 0)  {
+      if (keyerCWstarted == 0) {
+        startCW();
+      }
+      keyerCWstarted = 1;
+      delay(10);
+    }
+    // Keyer released
+    if ((keyerVal & 0x01) == 1) {
+      keyerCWstarted = 0;
+      stopCW();
+      delay(10);
+    }
+  } else {
+    // -- Iambic keywer
+    // Keyer pressed DOT
+    if (((keyerVal & 0x01) == 0) || (keyerDotPressed == 1)) {
+      startCW();
+      delay(WPM_dot_delay);
+      ((keyerVal & 0x01) == 0) ? keyerDotPressed  = 1 : keyerDotPressed = 0;
+      ((keyerVal & 0x02) == 0) ? keyerDashPressed = 1 : keyerDashPressed = 0;
+      stopCW();
+      delay(WPM_dot_delay);
+    }
+    // Keyer pressed DASH
+    if (((keyerVal & 0x02) == 0) || (keyerDashPressed == 1)) {
+      startCW();
+      delay(WPM_dot_delay);
+      delay(WPM_dot_delay);
+      ((keyerVal & 0x01) == 0) ? keyerDotPressed  = 1 : keyerDotPressed = 0;
+      ((keyerVal & 0x02) == 0) ? keyerDashPressed = 1 : keyerDashPressed = 0;
+      delay(WPM_dot_delay);
+      stopCW();
+      delay(WPM_dot_delay);
+    }
+  }
+  // Process timeout for display items other than main screen
+
+  /*if (program_state != S_RUN_RUN) {
+    timeout_cnt++;
+    if (timeout_cnt > 4000) {
+      display_valuefield_clear();
+      display_valuefield_begin();
+      display.print("Timeout...");
+      display.display();
+      delay(600);
+      timeout_cnt=0;
+      RotaryEncPush(&RotaryEnc_FreqWord);
+      program_state = S_RUN;
+    }
+
+    }*/
+  // Main FSM
+  //-----------------------------------------
+  switch (program_state) {
+    //--------------------------------
+    case S_RUN:
+      display_valuefield_clear();
+      program_state = S_RUN_RUN;
       break;
-      //--------------------------------
-      case S_RUN_RUN:
-        // Update display with Frequency info when it has changed
-        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          limitRotaryEncISR_values();
-          display_mainfield_begin(23);
-          format_freq(RegWordToFreq(RotaryEncISR.cntVal), freq_ascii_buf);
-          //format_freq(RegWordToFreq(RotaryEncISR.cntVal) - 2400000000, freq_ascii_buf);
-          //display.println(RegWordToFreq(RotaryEncISR.cntVal),DEC);      
-          display.print(freq_ascii_buf);
-          display.display();      
-          JUsetRfFrequency(RegWordToFreq(RotaryEncISR.cntVal), RotaryEnc_OffsetHz.cntVal);  // Offset     
-          display_status_bar();
-        }
-        //
-        RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        //
-        // This has to be at very end since with RotaryEncPush we are making RotaryEncISR.cntValOld different from RotaryEncISR.cntVal
-        if (pushBtnVal == PUSH_BTN_PRESSED) {
-          WAIT_Push_Btn_Release(200);
-          program_state = S_TOP_MENU_ITEMS;
-          RotaryEncPop(&RotaryEnc_FreqWord);
-          RotaryEncPush(&RotaryEnc_MenuSelection);
-        }
-        //
+    //--------------------------------
+    case S_RUN_RUN:
+      // Update display with Frequency info when it has changed
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        limitRotaryEncISR_values();
+        display_mainfield_begin(23);
+        format_freq(RegWordToFreq(RotaryEncISR.cntVal), freq_ascii_buf);
+        //format_freq(RegWordToFreq(RotaryEncISR.cntVal) - 2400000000, freq_ascii_buf);
+        //display.println(RegWordToFreq(RotaryEncISR.cntVal),DEC);
+        display.print(freq_ascii_buf);
+        display.display();
+        JUsetRfFrequency(RegWordToFreq(RotaryEncISR.cntVal), RotaryEnc_OffsetHz.cntVal);  // Offset
+        display_status_bar();
+      }
+      //
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      //
+      // This has to be at very end since with RotaryEncPush we are making RotaryEncISR.cntValOld different from RotaryEncISR.cntVal
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        WAIT_Push_Btn_Release(200);
+        program_state = S_TOP_MENU_ITEMS;
+        RotaryEncPop(&RotaryEnc_FreqWord);
+        RotaryEncPush(&RotaryEnc_MenuSelection);
+      }
+      //
       break;
-      //--------------------------------
-      case S_TOP_MENU_ITEMS:
-        // Wrap aroud
-        menuIndex = RotaryEncISR.cntVal % (sizeof(TopMenuArray) / sizeof(TopMenuArray[0]));
-        // Update display if there is change
-        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          timeout_cnt=0;
-          display_mainfield_begin(10);
-          display.print(TopMenuArray[menuIndex]);
-          display.display();
-        }
-        RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        //
-        if (pushBtnVal == PUSH_BTN_PRESSED) {
-          WAIT_Push_Btn_Release(200);
-          RotaryEncPop(&RotaryEnc_MenuSelection);
-          switch (menuIndex) {
+    //--------------------------------
+    case S_TOP_MENU_ITEMS:
+      // Wrap aroud
+      menuIndex = RotaryEncISR.cntVal % (sizeof(TopMenuArray) / sizeof(TopMenuArray[0]));
+      // Update display if there is change
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        timeout_cnt = 0;
+        display_mainfield_begin(10);
+        display.print(TopMenuArray[menuIndex]);
+        display.display();
+      }
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      //
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        WAIT_Push_Btn_Release(200);
+        RotaryEncPop(&RotaryEnc_MenuSelection);
+        switch (menuIndex) {
           // -----------------------------
           case 0:
             program_state = S_RUN;
             RotaryEncPush(&RotaryEnc_FreqWord); // makes RotaryEncISR.cntValOld different from RotaryEncISR.cntVal  ==> forces display update
-          break;
+            break;
           // -----------------------------
           case 1:
             program_state = S_RUN_CQ;
             display_valuefield_begin();
             display.print("CQ...");
             display.display();
-          break;
+            break;
           // -----------------------------
           case 2:
             program_state = S_SET_SPEED_WPM;
             RotaryEncPush(&RotaryEnc_KeyerSpeedWPM); // makes RotaryEncISR.cntValOld different from RotaryEncISR.cntVal  ==> forces display update
-          break;
+            break;
           // -----------------------------
           case 3:
             program_state = S_SET_OUTPUT_POWER;
             RotaryEncPush(&RotaryEnc_OutPowerMiliWatt); // makes RotaryEncISR.cntValOld different from RotaryEncISR.cntVal  ==> forces display update
-          break;
+            break;
           // -----------------------------
           case 4:
             program_state = S_SET_KEYER_TYPE;
             RotaryEncPush(&RotaryEnc_KeyerType); // makes RotaryEncISR.cntValOld different from RotaryEncISR.cntVal  ==> forces display update
-          break;
+            break;
           // -----------------------------
           case 5:
             program_state = S_SET_FREQ_OFFSET;
             RotaryEncPush(&RotaryEnc_OffsetHz); // makes RotaryEncISR.cntValOld different from RotaryEncISR.cntVal  ==> forces display update
-          break;
+            break;
           // -----------------------------
           case 6:
             program_state = S_SET_BUZZER_FREQ;
             RotaryEncPush(&RotaryEnc_BuzzerFreq); // makes RotaryEncISR.cntValOld different from RotaryEncISR.cntVal  ==> forces display update
-          break;
+            break;
           // -----------------------------
           case 7:
             program_state  = S_SET_TEXT_GENERIC;
@@ -520,7 +645,7 @@ void loop()
             RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
             RotaryEncISR.cntVal = s_general_ascii_buf[0];
             general_ascii_buf_index = 0;
-          break;
+            break;
           // -----------------------------
           case 8:
             program_state  = S_SET_TEXT_GENERIC;
@@ -529,7 +654,7 @@ void loop()
             RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
             RotaryEncISR.cntVal = s_general_ascii_buf[0];
             general_ascii_buf_index = 0;
-          break;
+            break;
           // -----------------------------
           case 9:
             program_state  = S_SET_TEXT_GENERIC;
@@ -538,247 +663,258 @@ void loop()
             RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
             RotaryEncISR.cntVal = s_general_ascii_buf[0];
             general_ascii_buf_index = 0;
-          break;
+            break;
           // -----------------------------
           case 10:
             program_state = S_WIFI_RECONNECT;
-          break;
+            break;
           // -----------------------------
           case 11:
             program_state = S_RUN_BEACON;
             display_valuefield_begin();
             display.print("BEACON...");
             display.display();
-          break;
-          // -----------------------------          
+            break;
+          // -----------------------------
           default:
             program_state = S_RUN;
-          break;
-          }
-        }        
-      break;
-      //--------------------------------
-      case S_RUN_CQ:
-        stop = 0;
-        timeout_cnt=0;   // do not allow to timeout this operation
-        for(int j=0;(j<3) && !stop;j++) {
-          // CQ
-          for(int i=0;(i<sizeof(cq_message_buf)) && !stop;i++) {
-            morseEncode(cq_message_buf[i]);
-            if (pushBtnVal == PUSH_BTN_PRESSED) { stop++; }
-          }
-          // My Call
-          for(int i=0;(i<s_mycall_ascii_buf.length()) && !stop;i++) {
-            morseEncode(s_mycall_ascii_buf[i]);
-            if (pushBtnVal == PUSH_BTN_PRESSED) { stop++; }
-          }
-          //
-          morseEncode(' ');
-          // My Call
-          for(int i=0;(i<s_mycall_ascii_buf.length()) && !stop;i++) {
-            morseEncode(s_mycall_ascii_buf[i]);
-            if (pushBtnVal == PUSH_BTN_PRESSED) { stop++; }
-          }
-        } // j
-        // +K
-        for(int i=0;(i<sizeof(cq_message_end_buf)) && !stop;i++) {
-          morseEncode(cq_message_end_buf[i]);
-          if (pushBtnVal == PUSH_BTN_PRESSED) { stop++; }
+            break;
         }
+      }
+      break;
+    //--------------------------------
+    case S_RUN_CQ:
+      stop = 0;
+      timeout_cnt = 0; // do not allow to timeout this operation
+      for (int j = 0; (j < 3) && !stop; j++) {
+        // CQ
+        for (int i = 0; (i < sizeof(cq_message_buf)) && !stop; i++) {
+          morseEncode(cq_message_buf[i]);
+          if (pushBtnVal == PUSH_BTN_PRESSED) {
+            stop++;
+          }
+        }
+        // My Call
+        for (int i = 0; (i < s_mycall_ascii_buf.length()) && !stop; i++) {
+          morseEncode(s_mycall_ascii_buf[i]);
+          if (pushBtnVal == PUSH_BTN_PRESSED) {
+            stop++;
+          }
+        }
+        //
+        morseEncode(' ');
+        // My Call
+        for (int i = 0; (i < s_mycall_ascii_buf.length()) && !stop; i++) {
+          morseEncode(s_mycall_ascii_buf[i]);
+          if (pushBtnVal == PUSH_BTN_PRESSED) {
+            stop++;
+          }
+        }
+      } // j
+      // +K
+      for (int i = 0; (i < sizeof(cq_message_end_buf)) && !stop; i++) {
+        morseEncode(cq_message_end_buf[i]);
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
+          stop++;
+        }
+      }
+      WAIT_Push_Btn_Release(200);
+      RotaryEncPush(&RotaryEnc_FreqWord);
+      program_state = S_RUN;
+      display.display();
+      break;
+    //--------------------------------
+    case S_SET_SPEED_WPM:
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        timeout_cnt = 0;
+        limitRotaryEncISR_values();
+        display_valuefield_begin();
+        display.print(RotaryEncISR.cntVal);
+        display.display();
+        Calc_WPM_dot_delay(RotaryEncISR.cntVal);  // this will set the WPM_dot_delay variable
+      }
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
+        preferences.putInt("KeyerWPM", RotaryEncISR.cntVal);
+        RotaryEncPop(&RotaryEnc_KeyerSpeedWPM);
         RotaryEncPush(&RotaryEnc_FreqWord);
         program_state = S_RUN;
+      }
+      break;
+    //--------------------------------
+    case S_SET_OUTPUT_POWER:
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        timeout_cnt = 0;
+        limitRotaryEncISR_values();
+        display_valuefield_begin();
+        //RotaryEncISR.cntVal = RotaryEncISR.cntVal % (sizeof(PowerArrayMiliWatt) / sizeof(uint32_t)); // safe
+        RotaryEncISR.cntVal = RotaryEncISR.cntVal % PowerArrayMiliWatt_Size;
+        display.print(PowerArrayMiliWatt[RotaryEncISR.cntVal][0]);
+        display.print(" mW    ");
         display.display();
+        LT.setTxParams(PowerArrayMiliWatt[RotaryEncISR.cntVal][1], RADIO_RAMP_10_US);
+      }
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        WAIT_Push_Btn_Release(200);
+        preferences.putInt("OutPower", RotaryEncISR.cntVal);
+        RotaryEncPop(&RotaryEnc_OutPowerMiliWatt);
+        RotaryEncPush(&RotaryEnc_FreqWord);
+        program_state = S_RUN;
+      }
       break;
-      //--------------------------------
-      case S_SET_SPEED_WPM:
-        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          timeout_cnt=0;
-          limitRotaryEncISR_values();
-          display_valuefield_begin();
-          display.print(RotaryEncISR.cntVal);
-          display.display();
-          Calc_WPM_dot_delay(RotaryEncISR.cntVal);  // this will set the WPM_dot_delay variable
-        }
-        RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        if (pushBtnVal == PUSH_BTN_PRESSED) {
-          WAIT_Push_Btn_Release(200);
-          preferences.putInt("KeyerWPM", RotaryEncISR.cntVal);
-          RotaryEncPop(&RotaryEnc_KeyerSpeedWPM);
-          RotaryEncPush(&RotaryEnc_FreqWord);
-          program_state = S_RUN;
-        }        
+    //--------------------------------
+    case S_SET_KEYER_TYPE:
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        timeout_cnt = 0;
+        display_valuefield_begin();
+        display.print(RotaryEncISR.cntVal % 2 ?  "Straight  " : "Iambic    ");
+        display.display();
+      }
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      //
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        WAIT_Push_Btn_Release(200);
+        preferences.putInt("KeyerType", RotaryEncISR.cntVal);
+        RotaryEncPop(&RotaryEnc_KeyerType);
+        RotaryEncPush(&RotaryEnc_FreqWord);
+        program_state = S_RUN;
+      }
       break;
-      //--------------------------------
-      case S_SET_OUTPUT_POWER:
-        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          timeout_cnt=0;
-          limitRotaryEncISR_values();
-          display_valuefield_begin();
-          //RotaryEncISR.cntVal = RotaryEncISR.cntVal % (sizeof(PowerArrayMiliWatt) / sizeof(uint32_t)); // safe
-          RotaryEncISR.cntVal = RotaryEncISR.cntVal % PowerArrayMiliWatt_Size;
-          display.print(PowerArrayMiliWatt[RotaryEncISR.cntVal][0]);
-          display.print(" mW    ");
-          display.display();
-          LT.setTxParams(PowerArrayMiliWatt[RotaryEncISR.cntVal][1], RADIO_RAMP_10_US);
-        }
-        RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        if (pushBtnVal == PUSH_BTN_PRESSED) {
-          WAIT_Push_Btn_Release(200);
-          preferences.putInt("OutPower", RotaryEncISR.cntVal);
-          RotaryEncPop(&RotaryEnc_OutPowerMiliWatt);
-          RotaryEncPush(&RotaryEnc_FreqWord);
-          program_state = S_RUN;
-        }        
-      break;
-      //--------------------------------
-      case S_SET_KEYER_TYPE:
-        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          timeout_cnt=0;
-          display_valuefield_begin();
-          display.print(RotaryEncISR.cntVal%2 ?  "Straight  " : "Iambic    ");
-          display.display();
-        }
-        RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        //
-        if (pushBtnVal == PUSH_BTN_PRESSED) {
-          WAIT_Push_Btn_Release(200);
-          preferences.putInt("KeyerType", RotaryEncISR.cntVal);
-          RotaryEncPop(&RotaryEnc_KeyerType);
-          RotaryEncPush(&RotaryEnc_FreqWord);
-          program_state = S_RUN;
-        }        
-      break;
-      //--------------------------------
-      case S_SET_FREQ_OFFSET:
-        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          timeout_cnt=0;
-          limitRotaryEncISR_values();
-          JUsetRfFrequency(RegWordToFreq(RotaryEncISR.cntVal), RotaryEncISR.cntVal);  // Offset     
-          display_valuefield_begin();
-          display.print(RotaryEncISR.cntVal);
-          display.display();
-        }
-        RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        //
-        if (pushBtnVal == PUSH_BTN_PRESSED) {
-          WAIT_Push_Btn_Release(200);
-          preferences.putInt("OffsetHz", RotaryEncISR.cntVal);
-          RotaryEncPop(&RotaryEnc_OffsetHz);
-          RotaryEncPush(&RotaryEnc_FreqWord);
-          program_state = S_RUN;
-        }        
+    //--------------------------------
+    case S_SET_FREQ_OFFSET:
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        timeout_cnt = 0;
+        limitRotaryEncISR_values();
+        JUsetRfFrequency(RegWordToFreq(RotaryEncISR.cntVal), RotaryEncISR.cntVal);  // Offset
+        display_valuefield_begin();
+        display.print(RotaryEncISR.cntVal);
+        display.display();
+      }
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      //
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        WAIT_Push_Btn_Release(200);
+        preferences.putInt("OffsetHz", RotaryEncISR.cntVal);
+        RotaryEncPop(&RotaryEnc_OffsetHz);
+        RotaryEncPush(&RotaryEnc_FreqWord);
+        program_state = S_RUN;
+      }
       break;
 
-      //--------------------------------
-      case S_SET_BUZZER_FREQ:
-        if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          timeout_cnt=0;
-          display_valuefield_begin();
-          display.print(RotaryEncISR.cntVal);
-          display.display();
-          ledcWriteTone(3, RotaryEncISR.cntVal);
-          delay(100);
-          ledcWriteTone(3, 0);
-        }
-        RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        //
-        if (pushBtnVal == PUSH_BTN_PRESSED) {
-          WAIT_Push_Btn_Release(200);
-          preferences.putInt("BuzzerFreq", RotaryEncISR.cntVal);
-          RotaryEncPop(&RotaryEnc_BuzzerFreq);
+    //--------------------------------
+    case S_SET_BUZZER_FREQ:
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        timeout_cnt = 0;
+        display_valuefield_begin();
+        display.print(RotaryEncISR.cntVal);
+        display.display();
+        ledcWriteTone(3, RotaryEncISR.cntVal);
+        delay(100);
+        ledcWriteTone(3, 0);
+      }
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      //
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        WAIT_Push_Btn_Release(200);
+        preferences.putInt("BuzzerFreq", RotaryEncISR.cntVal);
+        RotaryEncPop(&RotaryEnc_BuzzerFreq);
+        RotaryEncPush(&RotaryEnc_FreqWord);
+        program_state = S_RUN;
+      }
+      break;
+    //--------------------------------
+    case S_SET_TEXT_GENERIC:
+      //if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+      limitRotaryEncISR_values();
+      delay(150);
+      timeout_cnt += 15;  // accelerate timeout_cnt since we have delay here
+      display_valuefield_begin();
+      if (loopCnt % 2) {
+        s_general_ascii_buf[general_ascii_buf_index] = RotaryEncISR.cntVal;
+      } else {
+        s_general_ascii_buf[general_ascii_buf_index] = ' ';
+      }
+      display.print(s_general_ascii_buf);
+      display.display();
+      // Set it back to valid character after displaying
+      s_general_ascii_buf[general_ascii_buf_index] = RotaryEncISR.cntVal;
+      //}
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      //
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        timeout_cnt = 0;
+        WAIT_Push_Btn_Release(200);
+        // 127 = End of string
+        if (RotaryEncISR.cntVal == 127) {
+          s_general_ascii_buf[general_ascii_buf_index] = 0;  // Terminate string with null
+          switch (set_text_state) {
+            //---------------------
+            case S_SET_MY_CALL:
+              preferences.putString("MyCall", s_general_ascii_buf);
+              s_mycall_ascii_buf = s_general_ascii_buf.substring(0);
+              break;
+            //---------------------
+            case S_SET_WIFI_SSID:
+              preferences.putString("MySSID", s_general_ascii_buf);
+              s_wifi_ssid_ascii_buf = s_general_ascii_buf.substring(0);
+              break;
+            //---------------------
+            case S_SET_WIFI_PWD:
+              preferences.putString("MyPWD", s_general_ascii_buf);
+              s_wifi_pwd_ascii_buf = s_general_ascii_buf.substring(0);
+              break;
+            //---------------------
+            default:
+              break;
+          }
           RotaryEncPush(&RotaryEnc_FreqWord);
           program_state = S_RUN;
-        }        
-      break;
-      //--------------------------------
-      case S_SET_TEXT_GENERIC:
-        //if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
-          limitRotaryEncISR_values();
-          delay(150);
-          timeout_cnt += 15;  // accelerate timeout_cnt since we have delay here
-          display_valuefield_begin();
-          if (loopCnt % 2) {
-            s_general_ascii_buf[general_ascii_buf_index] = RotaryEncISR.cntVal;
+        } else {
+          general_ascii_buf_index++;
+          if (general_ascii_buf_index >= s_general_ascii_buf.length()) {
+            s_general_ascii_buf += RotaryEncISR.cntVal;;
+            RotaryEncISR.cntVal = s_general_ascii_buf[general_ascii_buf_index];
           } else {
-            s_general_ascii_buf[general_ascii_buf_index] = ' ';
+            RotaryEncISR.cntVal = s_general_ascii_buf[general_ascii_buf_index];
           }
-          display.print(s_general_ascii_buf);    
-          display.display();
-          // Set it back to valid character after displaying     
-          s_general_ascii_buf[general_ascii_buf_index] = RotaryEncISR.cntVal;
-        //}
-        RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-        //
-        if (pushBtnVal == PUSH_BTN_PRESSED) {
-          timeout_cnt=0;
-          WAIT_Push_Btn_Release(200);
-          // 127 = End of string
-          if (RotaryEncISR.cntVal == 127) {
-            s_general_ascii_buf[general_ascii_buf_index] = 0;  // Terminate string with null
-            switch (set_text_state) {
-              //---------------------
-              case S_SET_MY_CALL:
-                preferences.putString("MyCall", s_general_ascii_buf);          
-                s_mycall_ascii_buf = s_general_ascii_buf.substring(0); 
-              break;
-              //---------------------
-              case S_SET_WIFI_SSID:
-                preferences.putString("MySSID", s_general_ascii_buf);          
-                s_wifi_ssid_ascii_buf = s_general_ascii_buf.substring(0); 
-              break;
-              //---------------------
-              case S_SET_WIFI_PWD:
-                preferences.putString("MyPWD", s_general_ascii_buf);          
-                s_wifi_pwd_ascii_buf = s_general_ascii_buf.substring(0); 
-              break;
-              //---------------------
-              default:
-              break;
-            }
-            RotaryEncPush(&RotaryEnc_FreqWord);
-            program_state = S_RUN;
-          } else {
-            general_ascii_buf_index++;
-            if (general_ascii_buf_index >= s_general_ascii_buf.length()) {
-              s_general_ascii_buf+=RotaryEncISR.cntVal;;
-              RotaryEncISR.cntVal = s_general_ascii_buf[general_ascii_buf_index];
-            } else {
-              RotaryEncISR.cntVal = s_general_ascii_buf[general_ascii_buf_index];
-            }
-            RotaryEncISR.cntValOld = RotaryEncISR.cntVal + 1;   // Force display update in next cycle
+          RotaryEncISR.cntValOld = RotaryEncISR.cntVal + 1;   // Force display update in next cycle
+        }
+      }
+      break;
+    //--------------------------------
+    case S_WIFI_RECONNECT:
+      break;
+    //--------------------------------
+    case S_RUN_BEACON:
+      //
+      timeout_cnt = 0; // do not allow to timeout this operation
+      for (int j = 0; j < 10; j++) {
+        pushBtnPressed = 0;
+        for (int i = 0; i < sizeof(beacon_message_buf); i++) {
+          morseEncode(beacon_message_buf[i]);
+          if (pushBtnVal == PUSH_BTN_PRESSED) {
+            pushBtnPressed = 1;
+            break;
           }
         }
+        if (pushBtnPressed != 0) break;
+      }
+      //if (pushBtnPressed) {
+      WAIT_Push_Btn_Release(200);
+      RotaryEncPush(&RotaryEnc_FreqWord);
+      display_valuefield_begin();
+      display.display();
+      program_state = S_RUN;
+      //}
       break;
-      //--------------------------------
-      case S_WIFI_RECONNECT:
+    //--------------------------------
+    default:
       break;
-      //--------------------------------
-      case S_RUN_BEACON:
-        //
-        timeout_cnt=0;  // do not allow to timeout this operation
-        for(int j=0;j<10;j++) {
-          pushBtnPressed=0;
-          for(int i=0;i<sizeof(beacon_message_buf);i++) {
-            morseEncode(beacon_message_buf[i]);
-            if (pushBtnVal == PUSH_BTN_PRESSED) { pushBtnPressed=1; break; }
-          }
-          if (pushBtnPressed != 0) break;
-        }
-        //if (pushBtnPressed) {
-          WAIT_Push_Btn_Release(200);
-          RotaryEncPush(&RotaryEnc_FreqWord);
-          display_valuefield_begin();
-          display.display();  
-          program_state = S_RUN;
-        //}        
-      break;
-      //--------------------------------
-      default:
-      break;
-   } // switch program_state
+  } // switch program_state
 
-   loopCnt++;
+  loopCnt++;
 
 }  // loop
 
@@ -787,61 +923,67 @@ void IRAM_ATTR onTimer() {
   //portENTER_CRITICAL_ISR(&timerMux);
   //interruptCounter++;
   //digitalWrite(LED_PIN,LEDtoggle);
-  //LEDtoggle = !LEDtoggle;  
+  //LEDtoggle = !LEDtoggle;
   //portEXIT_CRITICAL_ISR(&timerMux);
 
-   uint32_t incr_val;
-   //
-   if (ISR_cnt != 255) ISR_cnt++;
-   //
-   keyerVal = digitalRead(KEYER_DASH)<<1 | digitalRead(KEYER_DOT);
-   //
-   pushBtnVal = digitalRead(ROTARY_ENC_PUSH);
-   // SW debounce
-   rotaryA_Val = (rotaryA_Val<<1 | (uint8_t)digitalRead(ROTARY_ENC_A)) & 0x0F;
-   //
-   // Rising edge --> 0001
-   if (rotaryA_Val == 0x01) {
-      //timeout_cnt = 0;
-      rotaryB_Val = digitalRead(ROTARY_ENC_B);
-      // Rotation speedup
-      (ISR_cnt <= 20) ? cntIncrISR = RotaryEncISR.cntIncr<<4 : cntIncrISR = RotaryEncISR.cntIncr;
-      ISR_cnt = 0;
-      //
-      if (rotaryB_Val == 0) {
-          RotaryEncISR.cntVal += cntIncrISR;
-         //RotaryEncISR.cntVal = RotaryEncISR.cntVal + cntIncrISR;
-      } else {
-          RotaryEncISR.cntVal -= cntIncrISR;
-         //RotaryEncISR.cntVal = RotaryEncISR.cntVal - cntIncrISR;
-      }
-   }
-  
- 
+  uint32_t incr_val;
+  //
+  if (ISR_cnt != 255) ISR_cnt++;
+  //
+  keyerVal = digitalRead(KEYER_DASH) << 1 | digitalRead(KEYER_DOT);
+  //
+  pushBtnVal = digitalRead(ROTARY_ENC_PUSH);
+  // SW debounce
+  rotaryA_Val = (rotaryA_Val << 1 | (uint8_t)digitalRead(ROTARY_ENC_A)) & 0x0F;
+  //
+  // Rising edge --> 0001
+  if (rotaryA_Val == 0x01) {
+    //timeout_cnt = 0;
+    rotaryB_Val = digitalRead(ROTARY_ENC_B);
+    // Rotation speedup
+    (ISR_cnt <= 20) ? cntIncrISR = RotaryEncISR.cntIncr << 4 : cntIncrISR = RotaryEncISR.cntIncr;
+    ISR_cnt = 0;
+    //
+    if (rotaryB_Val == 0) {
+      RotaryEncISR.cntVal += cntIncrISR;
+      //RotaryEncISR.cntVal = RotaryEncISR.cntVal + cntIncrISR;
+    } else {
+      RotaryEncISR.cntVal -= cntIncrISR;
+      //RotaryEncISR.cntVal = RotaryEncISR.cntVal - cntIncrISR;
+    }
+  }
+
+
 }
 
 
 
 
 void setup() {
-  pinMode(ROTARY_ENC_A,    INPUT_PULLUP);   
-  pinMode(ROTARY_ENC_B,    INPUT_PULLUP);   
-  pinMode(ROTARY_ENC_PUSH, INPUT_PULLUP);  
-  pinMode(KEYER_DOT,       INPUT_PULLUP);  
-  pinMode(KEYER_DASH,      INPUT_PULLUP); 
-  pinMode(TCXO_EN, OUTPUT); 
-  digitalWrite(TCXO_EN,1);
+   
+   if (!SPIFFS.begin()) {
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }
+  
+  pinMode(ROTARY_ENC_A,    INPUT_PULLUP);
+  pinMode(ROTARY_ENC_B,    INPUT_PULLUP);
+  pinMode(ROTARY_ENC_PUSH, INPUT_PULLUP);
+  pinMode(KEYER_DOT,       INPUT_PULLUP);
+  pinMode(KEYER_DASH,      INPUT_PULLUP);
+  pinMode(TCXO_EN, OUTPUT);
+  digitalWrite(TCXO_EN, 1);
   // pinMode(LED1, OUTPUT);                                   //setup pin as output for indicator LED
   //
   // Configure BUZZER functionalities.
   ledcSetup(3, 8000, 8);   //PWM Channel, Freq, Resolution
   /// Attach BUZZER pin.
   ledcAttachPin(BUZZER, 3);  // Pin, Channel
- 
+
   // Timer for ISR which is processing rotary encoder events
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &onTimer, true);
-  timerAlarmWrite(timer, 3500, true);  // 2500 = 2.5 msec
+  timerAlarmWrite(timer, 2500, true);  // 2500 = 2.5 msec
   timerAlarmEnable(timer);
 
   RotaryEnc_FreqWord.cntVal  = FreqToRegWord(Frequency);
@@ -851,10 +993,10 @@ void setup() {
 
   RotaryEnc_MenuSelection    = {1000000, 0, 2000000, 1, 0};   // We will implement modulo to wrap around menu items
   RotaryEnc_KeyerSpeedWPM    = {20, 10, 30, 1, 0};
-  RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo 
+  RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo
   RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
   RotaryEnc_BuzzerFreq       = {600, 0, 2000, 100, 0};
-  RotaryEnc_OutPowerMiliWatt = {PowerArrayMiliWatt_Size-1, 0, PowerArrayMiliWatt_Size-1, 1, 0};
+  RotaryEnc_OutPowerMiliWatt = {PowerArrayMiliWatt_Size - 1, 0, PowerArrayMiliWatt_Size - 1, 1, 0};
   RotaryEnc_TextInput_Char_Index  = {65, 33, 127, 1, 66};
 
 
@@ -866,38 +1008,51 @@ void setup() {
   RotaryEnc_KeyerType.cntVal        = preferences.getInt("KeyerType", 0);
   RotaryEnc_OffsetHz.cntVal         = preferences.getInt("OffsetHz", 0);
   RotaryEnc_BuzzerFreq.cntVal       = preferences.getInt("BuzzerFreq", 600);
-  RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower", PowerArrayMiliWatt_Size-1);  // Max output power
+  RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower", PowerArrayMiliWatt_Size - 1); // Max output power
 
   //mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???", 40);
   //wifi_ssid_ascii_buf               = preferences.getString("MySSID", "SSID???", 40);
   //wifi_pwd_ascii_buf                = preferences.getString("MyPWD",  "PWD???",  40);
 
   s_mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???");
-  s_wifi_ssid_ascii_buf               = preferences.getString("MySSID", "SSID??");
-  s_wifi_pwd_ascii_buf                = preferences.getString("MyPWD",  "PWD???");
+  s_wifi_ssid_ascii_buf               = preferences.getString("ssid", "SSID??");
+  s_wifi_pwd_ascii_buf                = preferences.getString("password",  "PWD???");
+
+  dhcp = preferences.getBool("dhcp", 1);
+  con  = preferences.getBool("con", 0);
+  ssid = preferences.getString("ssid");
+  password = preferences.getString("password");
+  apikey = preferences.getString("apikey","1111");
+  sIP        = preferences.getString("ip", "192.168.1.200");
+  sGateway   = preferences.getString("gateway", "192.168.1.1");
+  sSubnet    = preferences.getString("subnet", "255.255.255.0");
+  sPrimaryDNS = preferences.getString("pdns", "8.8.8.8");
+  sSecondaryDNS = preferences.getString("sdns", "8.8.4.4");
+
+  preferences.end();
 
 
   Calc_WPM_dot_delay(RotaryEnc_KeyerSpeedWPM.cntVal);
 
   RotaryEncPush(&RotaryEnc_FreqWord);
 
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
     Serial.println(F("SSD1306 allocation failed"));
     //for(;;); // Don't proceed, loop forever
   }
 
-  
+
   display.clearDisplay();
-  display.fillRect(0,0,SCREEN_WIDTH,9,WHITE);  // x, y, width, height
+  display.fillRect(0, 0, SCREEN_WIDTH, 9, WHITE); // x, y, width, height
   display.setTextSize(1);
-  display.setTextColor(BLACK); 
+  display.setTextColor(BLACK);
   display.setCursor(1, 1);
   display.println(" QO-100 CW TX 2.4GHz");
-  display.drawFastVLine(0,0,SCREEN_HEIGHT,WHITE);
-  display.drawFastVLine(SCREEN_WIDTH-1,0,SCREEN_HEIGHT,WHITE);
+  display.drawFastVLine(0, 0, SCREEN_HEIGHT, WHITE);
+  display.drawFastVLine(SCREEN_WIDTH - 1, 0, SCREEN_HEIGHT, WHITE);
   display.display();
   delay(200);
- 
+
   //led_Flash(2, 125);                                       //two quick LED flashes to indicate program start
 
   Serial.begin(115200);
@@ -919,24 +1074,26 @@ void setup() {
   //SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
 
   //setup hardware pins used by device, then check if device is found
-   if (LT.begin(NSS, NRESET, RFBUSY, DIO1, DIO2, DIO3, RX_EN, TX_EN, LORA_DEVICE))  {
+  if (LT.begin(NSS, NRESET, RFBUSY, DIO1, DIO2, DIO3, RX_EN, TX_EN, LORA_DEVICE))  {
     Serial.println(F("LoRa Device found"));
     led_Flash(1, 50);
     delay(30);
-    led_Flash(1, 50*3);
+    led_Flash(1, 50 * 3);
     //delay(125);
     led_Flash(1, 50);
   } else {
     Serial.println(F("No device responding"));
-    while (1) { led_Flash(50, 50); } //long fast speed LED flash indicates device error 
+    while (1) {
+      led_Flash(50, 50);  //long fast speed LED flash indicates device error
+    }
   }
 
- //The function call list below shows the complete setup for the LoRa device using the information defined in the
+  //The function call list below shows the complete setup for the LoRa device using the information defined in the
   //Settings.h file.
   //The 'Setup LoRa device' list below can be replaced with a single function call;
   //LT.setupLoRa(Frequency, Offset, SpreadingFactor, Bandwidth, CodeRate);
 
-  
+
   //***************************************************************************************************
   //Setup LoRa device
   //***************************************************************************************************
@@ -954,7 +1111,7 @@ void setup() {
   //***************************************************************************************************
 
   LT.txEnable();  //This will stay alway ON as we transmit only
-  
+
 
   Serial.println();
   LT.printModemSettings();                               //reads and prints the configured LoRa settings, useful check
@@ -970,6 +1127,208 @@ void setup() {
   Serial.println();
 
   LT.setTxParams(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][1], RADIO_RAMP_10_US);
+
+  
+  
+  // Try connect to WIFI
+  if (!wifiConfigRequired)
+  {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin("TP-Link","7812023527");
+    //WiFi.begin(ssid.c_str(), password.c_str());
+    if (WiFi.waitForConnectResult() != WL_CONNECTED) {
+      Serial.printf("WiFi Failed!\n");
+      WiFi.disconnect();
+      wifiConfigRequired = true;
+    }
+    if (!wifiConfigRequired) {
+      Serial.print("WIFI IP Address: ");
+      IP = WiFi.localIP();
+      Serial.println(IP);
+    }
+  }
+
+  // not connected and make AP
+
+if (wifiConfigRequired) {
+
+    wifiConfigRequired = true;
+    Serial.println("Start AP");
+    Serial.printf("WiFi is not connected or configured. Starting AP mode\n");
+    ssid = "QO100TX";
+    WiFi.softAP(ssid.c_str());
+    IP = WiFi.softAPIP();
+    Serial.printf("SSID: %s, IP: ", ssid.c_str());
+    Serial.println(IP);
+  }
+
+
+   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
+
+    if ((request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) || wifiConfigRequired) {
+
+      if (request->hasParam(PARAM_MESSAGE)) {
+        //message = request->getParam(PARAM_MESSAGE)->value();
+      }
+
+      if (request->hasParam(PARAM_SPEED)) {
+        //sspeed = request->getParam(PARAM_SPEED)->value();
+        //speed = sspeed.toInt();
+        //update_speed();
+      }
+      request->send(SPIFFS, "/index.html", String(), false,   processor);
+    }
+    else {
+      request->send(401, "text/plain", "Unauthorized");
+    }
+  });
+
+
+  server.on("/update", HTTP_GET, [](AsyncWebServerRequest * request) {
+
+    if ((request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) || wifiConfigRequired) {
+
+      request->send(SPIFFS, "/update.html", String(), false,   processor);
+    }
+    else {
+      request->send(401, "text/plain", "Unauthorized");
+    }
+  });
+
+
+  server.on("/cfg", HTTP_GET, [](AsyncWebServerRequest * request)
+  {
+    if ((request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) || wifiConfigRequired) {
+
+      request->send(SPIFFS, "/cfg.html", String(), false,   processor);
+    } else request->send(401, "text/plain", "Unauthorized");
+  });
+  server.on("/cfg-save", HTTP_GET, [](AsyncWebServerRequest * request)
+  {
+    if (request->hasParam("ssid") && request->hasParam("password") && request->hasParam("apikey")) {
+      ssid = request->getParam(PARAM_SSID)->value();
+      if(request->getParam(PARAM_PASSWORD)->value()!=NULL) password = request->getParam(PARAM_PASSWORD)->value();
+      apikey = request->getParam(PARAM_APIKEY)->value();
+
+      if(request->hasParam("dhcp")) dhcp = true; else dhcp=false;  
+      if(request->hasParam("localip")) sIP = request->getParam(PARAM_LOCALIP)->value();
+      if(request->hasParam("gateway")) sGateway   = request->getParam(PARAM_GATEWAY)->value();
+      if(request->hasParam("subnet")) sSubnet    = request->getParam(PARAM_SUBNET)->value();
+      if(request->hasParam("pdns")) sPrimaryDNS = request->getParam(PARAM_PDNS)->value();
+      if(request->hasParam("sdns")) sSecondaryDNS = request->getParam(PARAM_SDNS)->value();
+      if(request->hasParam("con")) con = true; else con=false;
+      
+    // http://192.168.1.118/cfg-save?apikey=1111&dhcp=on&ssid=TP-Link&password=
+    // http://192.168.1.118/cfg-save?apikey=1111&localip=192.168.1.200&subnet=255.255.255.0&gateway=192.168.1.1&pdns=8.8.8.8&sdns=8.8.4.4&ssid=TP-Link&password=
+      request->send(200, "text/plain", "Config saved - SSID:" + ssid + " APIKEY: " + apikey + " restart in 5 seconds");
+      savePrefs();
+      delay(5000);
+      ESP.restart();
+      //request->redirect("/");
+    }
+    else
+      request->send(400, "text/plain", "Missing required parameters");
+  });
+
+
+  // Send a GET request to <IP>/get?message=<message>
+  server.on("/sendmorse", HTTP_GET, [] (AsyncWebServerRequest * request) {
+    if (request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) {
+      if (request->hasParam(PARAM_MESSAGE)) {
+       // message = request->getParam(PARAM_MESSAGE)->value();
+      }
+
+      if (request->hasParam(PARAM_SPEED)) {
+        //sspeed = request->getParam(PARAM_SPEED)->value();
+        //speed = sspeed.toInt();
+        //update_speed();
+      }
+      request->send(200, "text/plain", "OK");
+    } else request->send(401, "text/plain", "Unauthorized");
+
+
+  });
+
+  server.on("/js/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send(SPIFFS, "/js/bootstrap.bundle.min.js", "text/javascript");
+  });
+
+  server.on("/js/bootstrap4-toggle.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send(SPIFFS, "/js/bootstrap4-toggle.min.js", "text/css");
+  });
+
+
+  server.on("/js/jquery.mask.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send(SPIFFS, "/js/jquery.mask.min.js", "text/css");
+  });
+
+  server.on("/js/jquery-3.5.1.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send(SPIFFS, "/js/jquery-3.5.1.min.js", "text/css");
+  });
+
+  server.on("/css/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send(SPIFFS, "/css/bootstrap.min.css", "text/css");
+  });
+
+
+  server.on("/css/bootstrap4-toggle.min.css", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send(SPIFFS, "/css/bootstrap4-toggle.min.css", "text/css");
+  });
+
+
+  server.onNotFound(notFound);
+
+  server.begin();
+
+  if (udp.listen(UDP_PORT)) {
+    Serial.print("UDP running at IP: ");
+    Serial.print(IP);
+    Serial.println(" port: 6789");
+    udp.onPacket([](AsyncUDPPacket packet) {
+      Serial.print("Type of UDP datagram: ");
+      Serial.print(packet.isBroadcast() ? "Broadcast" : packet.isMulticast() ? "Multicast" : "Unicast");
+      Serial.print(", Sender: ");
+      Serial.print(packet.remoteIP());
+      Serial.print(":");
+      Serial.print(packet.remotePort());
+      Serial.print(", Receiver: ");
+      Serial.print(packet.localIP());
+      Serial.print(":");
+      Serial.print(packet.localPort());
+      Serial.print(", Message lenght: ");
+      Serial.print(packet.length());
+      Serial.print(", Payload: ");
+      Serial.write(packet.data(), packet.length());
+      Serial.println();
+      String udpdataString = (const char*)packet.data();
+      char bb[2];
+      int command = (int)packet.data()[1] - 48;
+      if (packet.data()[0] == 27) {
+
+        switch (command ) {
+          case 0: //break cw
+            //message = "";
+            break;
+          case 2:  // set speed
+            bb[0] = packet.data()[2];
+            bb[1] = packet.data()[3];
+            //speed = atoi(bb);
+            //sspeed = String(speed);
+            //update_speed();
+            break;
+
+          default:
+            break;
+        }
+
+
+      } else {
+        udpdataString.toUpperCase();
+        //message += udpdataString;
+      }
+
+    });
+  }
 
 
 }
@@ -1008,18 +1367,18 @@ uint32_t RegWordToFreq(uint32_t freqword) {
 // Will add decimal point as separator between thousands, milions...
 void format_freq(uint32_t n, char *out)
 {
-    int c;
-    char buf[20];
-    char *p;
+  int c;
+  char buf[20];
+  char *p;
 
-    sprintf(buf, "%u", n);
-    c = 2 - strlen(buf) % 3;
-    for (p = buf; *p != 0; p++) {
-       *out++ = *p;
-       if (c == 1) {
-           *out++ = '.';
-       }
-       c = (c + 1) % 3;
+  sprintf(buf, "%u", n);
+  c = 2 - strlen(buf) % 3;
+  for (p = buf; *p != 0; p++) {
+    *out++ = *p;
+    if (c == 1) {
+      *out++ = '.';
     }
-    *--out = 0;
+    c = (c + 1) % 3;
+  }
+  *--out = 0;
 }
