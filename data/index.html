@@ -5,30 +5,105 @@
     <title>QO-100 TX</title>
     <link rel="stylesheet" type="text/css" href="css/bootstrap.min.css">
     <link rel="stylesheet" type="text/css" href="css/bootstrap4-toggle.min.css">
-    <script src="/js/jquery-3.5.1.min.js"></script>
-    <script src="/js/bootstrap.bundle.min.js"></script>
-    <script src="/js/jquery.mask.min.js"></script>
-    <script src="/js/bootstrap4-toggle.min.js"></script>
-</head><body>
+    <script src="js/jquery-3.5.1.min.js"></script>
+    <script src="js/bootstrap.bundle.min.js"></script>
+    <script src="js/jquery.mask.min.js"></script>
+    <script src="js/bootstrap4-toggle.min.js"></script>
+
+    <script>
+        var mousewheelevt = (/Firefox/i.test(navigator.userAgent)) ? "DOMMouseScroll" : "mousewheel";
+
+        var MIN = 240000000;
+        var STEP = 168;
+        var MAX = 240500000;
+
+        $(document).ready(function () {
+            var change = function (type) {
+                var input = $('#incrementInput');
+                var val = parseInt(input.val());
+                var newVal = 0;
+                if (!val) {
+                    val = MIN;
+                    if (!val) {
+                        val = 1;
+                    }
+                }
+
+                if (type === '+') {
+                    newVal = val + STEP;
+                    if (MAX && newVal > MAX) {
+                        newVal = MAX;
+                    }
+                } else if (type === '-') {
+                    newVal = val - STEP;
+                    if (MIN && newVal < MIN) {
+                        newVal = MIN;
+                    }
+                }
+                input.val(newVal, 2);
+            };
+            $('body').bind(mousewheelevt, 'mousewheel', function (e) {
+                if (e.originalEvent.wheelDelta / 120 > 0) {
+                    // console.log('scrolling up !');
+                    change('+')
+                } else {
+                    // console.log('scrolling down !');
+                    change('-')
+                }
+            });
+
+            $('#incrementMinus').on('click', function () {
+                change('-')
+            });
+            $('#incrementPlus').on('click', function () {
+                change('+')
+            });
+        });
+    </script>
+
+</head>
+<body>
 
 
 <div class="d-flex justify-content-center m-md-5">
     <div class="card">
-        <div class="card-header bg-dark text-white">
+        <div class="card-header bg-dark text-white text-center">
             <h1>QO-100 TX</h1>
         </div>
         <div class="card-body">
- 
-  <div class="d-flex justify-content-end">
-	 <a href="cfg/?apikey=%APIKEY%"  class="btn btn-secondary align-self-right">
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-gear-fill" viewBox="0 0 16 16">
-  <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/>
-</svg>	
-</a>
-</div>
+
+            <div class="d-flex justify-content-end">
+               
+                <div style="max-width: 180px" class="mx-1">
+                    <div class="input-group">
+                        <button class="btn btn btn-outline-success" type="button" id="incrementMinus"
+                                style="min-width: 31px">
+                            -
+                        </button>
+                        <input type="text" class="form-control form-control text-center" id="incrementInput"
+                               value="%FRQ%">
+                        <button class="btn  btn btn-outline-success" type="button" id="incrementPlus"
+                                style="min-width: 31px">
+                            +
+                        </button>			
+                    </div>	
+                </div>
+			<div style="max-width: 150px" class="mx-1">
+                   	 <select class="form-select" id="pwr" name="pwr" aria-label="PWR select" size="1" >
+                        %PWR%
+                    </select>
+		</div>
+
+                <a href="cfg/?apikey=%APIKEY%" class="btn btn-secondary align-self-right">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"
+                         class="bi bi-gear-fill" viewBox="0 0 16 16">
+                        <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/>
+                    </svg>
+                </a>
+            </div>
 
             <form method="GET" action="/" id="form">
-		<input type="hidden" class="form-control" id="apikey" name="apikey" value="%APIKEY%">	
+                <input type="hidden" class="form-control" id="apikey" name="apikey" value="%APIKEY%">
                 <div class="form-group">
                     <label for="message">Text</label>
                     <input type="text" class="form-control" id="message" name="message" data-mask="00/00/0000">
@@ -45,6 +120,7 @@
                 <div class="d-flex justify-content-center m-2">
                     <input type="submit" value="Send" class="btn btn-primary m-3">
                     <input type="button" value="Break" class="btn btn-warning m-3" onclick="submitByButton()">
+		    <input type="button" value="Tune" class="btn btn-danger m-3" onclick="cfg/?apikey=%APIKEY%">	
                 </div>
             </form>
         </div>
