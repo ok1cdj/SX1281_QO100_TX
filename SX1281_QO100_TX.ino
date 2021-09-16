@@ -16,17 +16,17 @@
 //
 //
 // Power level settings - from documentation of LoRa128xF27 module
-// LEV dBm	mA		Reg value
-// 9  26.4  520 	13
-// 8  25.5  426 	10
-// 7  23.4  343 	7
-// 6  20.85 268 	4
-// 5  18.26 229 	1
-// 4  15.2 	182 	-2
-// 3  12.3 	155 	-5
-// 2  9.3 	138 	-8
-// 1  6.0 	130 	-12
-// 0  3.0 	125 	-15
+// LEV dBm  mA    Reg value
+// 9  26.4  520   13
+// 8  25.5  426   10
+// 7  23.4  343   7
+// 6  20.85 268   4
+// 5  18.26 229   1
+// 4  15.2  182   -2
+// 3  12.3  155   -5
+// 2  9.3   138   -8
+// 1  6.0   130   -12
+// 0  3.0   125   -15
 //
 // SX128x datasheet p. 73:   Reg vale 0 = -18dBm, Reg value 31 = 13dBm  ==> PA of the module has gain 32.2 dB
 //
@@ -57,14 +57,10 @@
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-
-//#define CW_SIDETONE_FREQ  600  // Hz
-
 #define PUSH_BTN_PRESSED 0
 #define WAIT_Push_Btn_Release(milisec)  delay(milisec);while(digitalRead(ROTARY_ENC_PUSH)==0){}
 
 // Webserver
-
 AsyncWebServer server(80);
 AsyncUDP udp;
 
@@ -77,7 +73,9 @@ String sSubnet    = "";
 String sPrimaryDNS = "";
 String sSecondaryDNS = "";
 
-
+String message;
+String sspeed = "20";
+uint32_t speed = 20;
 
 // web server requests
 const char* PARAM_MESSAGE = "message";
@@ -147,6 +145,7 @@ enum set_text_state_t {
 //
 #define PowerArrayMiliWatt_Size 5
 //
+// { Power_mW, Reg-setting }
 const uint32_t PowerArrayMiliWatt [][2] = {
   { 50,  0 },   // cca 50 mW
   { 100, 4 },   // cca 100 mW
@@ -155,9 +154,9 @@ const uint32_t PowerArrayMiliWatt [][2] = {
   { 450, 13 }   // cca 450 mW
 };
 //
-
+//
 const char * TopMenuArray[] = {
-  "1. Main LoRaCW    ",
+  "1. << Back        ",
   "2. CQ...          ",
   "3. Set WPM        ",
   "4. Set Out Power  ",
@@ -170,7 +169,8 @@ const char * TopMenuArray[] = {
   "11. WiFi Reconn.  ",
   "12. Beacon (vvv)  "
 };
-
+//
+// Rotary Encoder structure
 struct RotaryEncounters
 {
   int32_t cntVal;
@@ -211,8 +211,8 @@ char   wifi_ssid_ascii_buf[40];
 char   wifi_pwd_ascii_buf[40];
 
 String s_mycall_ascii_buf;
-String s_wifi_ssid_ascii_buf;
-String s_wifi_pwd_ascii_buf;
+//String s_wifi_ssid_ascii_buf;
+//String s_wifi_pwd_ascii_buf;
 String s_general_ascii_buf;
 
 
@@ -272,27 +272,29 @@ void display_valuefield_clear () {
 void display_status_bar () {
   // Delete old info by drawing rectangle
   display.fillRect(0, SCREEN_HEIGHT - 9 - 9, SCREEN_WIDTH, 9 + 9, WHITE); // x, y, width, height
+  display.fillRect(0, 0, SCREEN_WIDTH, 9, WHITE); // x, y, width, height
+  //
   display.setTextColor(BLACK);
   display.setTextSize(1);
-  display.setCursor(1, SCREEN_HEIGHT - 8); // 7 is the font height
+  //
+  // Display MY_CALL, configured WPM (or Straight keyer) and configured power in mW
+  display.setCursor(1, 1); // 7 is the font height
   display.print(s_mycall_ascii_buf);
-  display.setCursor(52, SCREEN_HEIGHT - 8); // 7 is the font height
+  display.setCursor(52, 1); // 7 is the font height
   if (RotaryEnc_KeyerType.cntVal & 0x00000001) {
     display.print("Manual,");
   } else {
     display.print(RotaryEnc_KeyerSpeedWPM.cntVal);
     display.print("wpm, ");
   }
-  //display.setCursor(40, SCREEN_HEIGHT-7); // 7 is the font height
   display.print(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][0]);
   display.print("mW");
-
+  // Display WiFi SSID and IP address
   display.setCursor(1, SCREEN_HEIGHT - 8 - 8); // 7 is the font height
-  display.print("WiFi: ");
-  display.print(s_wifi_ssid_ascii_buf);
-
+  display.print(ssid.c_str());
+  display.setCursor(1, SCREEN_HEIGHT - 8); // 7 is the font height
+  display.print(IP);
   display.display();
-  //... tbd
 }
 
 
@@ -372,11 +374,11 @@ void led_Flash(uint16_t flashes, uint16_t delaymS)
 void morseEncode ( unsigned char rxd ) {
   uint8_t i, j, m, mask, morse_len;
 
-  if (rxd >= 97 && rxd < 123) {		// > 'a' && < 'z'
-    rxd = rxd - 32;					// make the character uppercase
+  if (rxd >= 97 && rxd < 123) {   // > 'a' && < 'z'
+    rxd = rxd - 32;         // make the character uppercase
   }
   //
-  if ((rxd < 97) && (rxd > 12)) {		// above 96 no valid Morse characters
+  if ((rxd < 97) && (rxd > 12)) {   // above 96 no valid Morse characters
     m   = Morse_Coding_table[rxd - 32];
     morse_len = (m >> 5) & 0x07;
     mask = 0x10;
@@ -415,7 +417,7 @@ void notFound(AsyncWebServerRequest *request) {
 // process replacement in html pages
 String processor(const String& var) {
   if (var == "SPEED") {
-    //return sspeed;
+    return sspeed;
   }
   if (var == "NETWORKS" ) {
     String rsp;
@@ -463,7 +465,7 @@ return String();
 
 void savePrefs()
 {
-  preferences.begin("my-app", false);
+  //preferences.begin("my-app", false);    -- We assume this has been already called 
   preferences.putString("ssid", ssid);
   preferences.putString("password", password);
   preferences.putString("apikey", apikey);
@@ -474,25 +476,34 @@ void savePrefs()
   preferences.getString("subnet", sSubnet);
   preferences.getString("pdns", sPrimaryDNS);
   preferences.getString("sdns", sSecondaryDNS);
+  preferences.end();      // We can call preferences.end since after that we reboot
 
-  preferences.end();
+}
 
+// Task SendMorse
+void SendMorse ( void * parameter) {
+  Serial.print("Send morse Task running on core ");
+  Serial.println(xPortGetCoreID());
+  for (;;) { //infinite loop
+    if (message != "") {
+      message.toUpperCase();
+      int stri = message.length();
+      for (int i = 0; i < stri; i++) {
+        char c = message.charAt(i);
+        //send(c);
+        morseEncode(c);
+        if (stri < message.length()) {
+          stri = message.length();
+        }
+      }
+      message = "";
+    }
+    vTaskDelay(20);
+  }
 }
 
 void loop()
 {
-  // Some debug
-  /*
-    Serial.print("-- ");
-    Serial.print(program_state);
-    Serial.print(" ");
-    Serial.print(RotaryEncISR.cntVal);
-    Serial.print(" ");
-    //Serial.print(cntValOld);
-    Serial.println("");
-  */
-  //delay(150);
-
   //-----------------------------------------
   // -- Straight keyer
   if (RotaryEnc_KeyerType.cntVal & 0x00000001) {
@@ -533,32 +544,32 @@ void loop()
       delay(WPM_dot_delay);
     }
   }
-  // Process timeout for display items other than main screen
-
-  /*if (program_state != S_RUN_RUN) {
-    timeout_cnt++;
-    if (timeout_cnt > 4000) {
-      display_valuefield_clear();
-      display_valuefield_begin();
-      display.print("Timeout...");
-      display.display();
-      delay(600);
-      timeout_cnt=0;
-      RotaryEncPush(&RotaryEnc_FreqWord);
-      program_state = S_RUN;
-    }
-
-    }*/
+   // Process timeout for display items other than main screen
+   if (program_state != S_RUN_RUN) {
+     if (timeout_cnt > 6000) {
+       display_valuefield_clear();
+       display_valuefield_begin();
+       display.print("Timeout...");
+       display.display();
+       delay(600);
+       timeout_cnt=0;
+       RotaryEncPush(&RotaryEnc_FreqWord);
+       program_state = S_RUN;
+     }
+   }
+  //
   // Main FSM
   //-----------------------------------------
   switch (program_state) {
     //--------------------------------
     case S_RUN:
+      timeout_cnt = 0;
       display_valuefield_clear();
       program_state = S_RUN_RUN;
       break;
     //--------------------------------
     case S_RUN_RUN:
+      timeout_cnt = 0;
       // Update display with Frequency info when it has changed
       if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
         limitRotaryEncISR_values();
@@ -568,12 +579,10 @@ void loop()
         //display.println(RegWordToFreq(RotaryEncISR.cntVal),DEC);
         display.print(freq_ascii_buf);
         display.display();
-        JUsetRfFrequency(RegWordToFreq(RotaryEncISR.cntVal), RotaryEnc_OffsetHz.cntVal);  // Offset
+        JUsetRfFrequency(RegWordToFreq(RotaryEncISR.cntVal), RotaryEnc_OffsetHz.cntVal);
         display_status_bar();
       }
-      //
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-      //
       // This has to be at very end since with RotaryEncPush we are making RotaryEncISR.cntValOld different from RotaryEncISR.cntVal
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
@@ -581,7 +590,6 @@ void loop()
         RotaryEncPop(&RotaryEnc_FreqWord);
         RotaryEncPush(&RotaryEnc_MenuSelection);
       }
-      //
       break;
     //--------------------------------
     case S_TOP_MENU_ITEMS:
@@ -595,7 +603,7 @@ void loop()
         display.display();
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
-      //
+      // Decide into which menu item to go based on selection
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
         RotaryEncPop(&RotaryEnc_MenuSelection);
@@ -650,7 +658,8 @@ void loop()
           case 8:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_WIFI_SSID;
-            s_general_ascii_buf = s_wifi_ssid_ascii_buf.substring(0);
+            //s_general_ascii_buf = s_wifi_ssid_ascii_buf.substring(0);
+            s_general_ascii_buf = ssid.substring(0);
             RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
             RotaryEncISR.cntVal = s_general_ascii_buf[0];
             general_ascii_buf_index = 0;
@@ -659,7 +668,8 @@ void loop()
           case 9:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_WIFI_PWD;
-            s_general_ascii_buf = s_wifi_pwd_ascii_buf.substring(0);
+            //s_general_ascii_buf = s_wifi_pwd_ascii_buf.substring(0);
+            s_general_ascii_buf = password.substring(0);
             RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
             RotaryEncISR.cntVal = s_general_ascii_buf[0];
             general_ascii_buf_index = 0;
@@ -685,11 +695,11 @@ void loop()
     //--------------------------------
     case S_RUN_CQ:
       stop = 0;
-      timeout_cnt = 0; // do not allow to timeout this operation
       for (int j = 0; (j < 3) && !stop; j++) {
         // CQ
         for (int i = 0; (i < sizeof(cq_message_buf)) && !stop; i++) {
           morseEncode(cq_message_buf[i]);
+          timeout_cnt = 0; // do not allow to timeout this operation
           if (pushBtnVal == PUSH_BTN_PRESSED) {
             stop++;
           }
@@ -697,6 +707,7 @@ void loop()
         // My Call
         for (int i = 0; (i < s_mycall_ascii_buf.length()) && !stop; i++) {
           morseEncode(s_mycall_ascii_buf[i]);
+          timeout_cnt = 0; // do not allow to timeout this operation
           if (pushBtnVal == PUSH_BTN_PRESSED) {
             stop++;
           }
@@ -706,6 +717,7 @@ void loop()
         // My Call
         for (int i = 0; (i < s_mycall_ascii_buf.length()) && !stop; i++) {
           morseEncode(s_mycall_ascii_buf[i]);
+          timeout_cnt = 0; // do not allow to timeout this operation
           if (pushBtnVal == PUSH_BTN_PRESSED) {
             stop++;
           }
@@ -714,10 +726,12 @@ void loop()
       // +K
       for (int i = 0; (i < sizeof(cq_message_end_buf)) && !stop; i++) {
         morseEncode(cq_message_end_buf[i]);
+        timeout_cnt = 0; // do not allow to timeout this operation
         if (pushBtnVal == PUSH_BTN_PRESSED) {
           stop++;
         }
       }
+      //
       WAIT_Push_Btn_Release(200);
       RotaryEncPush(&RotaryEnc_FreqWord);
       program_state = S_RUN;
@@ -736,6 +750,8 @@ void loop()
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
+        speed = RotaryEncISR.cntVal;
+        sspeed = String(speed);
         preferences.putInt("KeyerWPM", RotaryEncISR.cntVal);
         RotaryEncPop(&RotaryEnc_KeyerSpeedWPM);
         RotaryEncPush(&RotaryEnc_FreqWord);
@@ -810,6 +826,7 @@ void loop()
         display_valuefield_begin();
         display.print(RotaryEncISR.cntVal);
         display.display();
+        // Short beep with new tone value
         ledcWriteTone(3, RotaryEncISR.cntVal);
         delay(100);
         ledcWriteTone(3, 0);
@@ -826,11 +843,11 @@ void loop()
       break;
     //--------------------------------
     case S_SET_TEXT_GENERIC:
-      //if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+      // Reset timeout_cnt when there is activity with encoder
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) { timeout_cnt = 0; }
       limitRotaryEncISR_values();
-      delay(150);
-      timeout_cnt += 15;  // accelerate timeout_cnt since we have delay here
       display_valuefield_begin();
+      // Blinking effect on selected character
       if (loopCnt % 2) {
         s_general_ascii_buf[general_ascii_buf_index] = RotaryEncISR.cntVal;
       } else {
@@ -842,7 +859,9 @@ void loop()
       s_general_ascii_buf[general_ascii_buf_index] = RotaryEncISR.cntVal;
       //}
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      delay(150);
       //
+      // With pushbutton pressed either go to next character of finish if selected character was decimal 127 = ⌂ (looks like house icon with roof)
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         timeout_cnt = 0;
         WAIT_Push_Btn_Release(200);
@@ -857,13 +876,15 @@ void loop()
               break;
             //---------------------
             case S_SET_WIFI_SSID:
-              preferences.putString("MySSID", s_general_ascii_buf);
-              s_wifi_ssid_ascii_buf = s_general_ascii_buf.substring(0);
+              preferences.putString("ssid", s_general_ascii_buf);
+              //s_wifi_ssid_ascii_buf = s_general_ascii_buf.substring(0);
+              ssid = s_general_ascii_buf.substring(0);
               break;
             //---------------------
             case S_SET_WIFI_PWD:
-              preferences.putString("MyPWD", s_general_ascii_buf);
-              s_wifi_pwd_ascii_buf = s_general_ascii_buf.substring(0);
+              preferences.putString("password", s_general_ascii_buf);
+              //s_wifi_pwd_ascii_buf = s_general_ascii_buf.substring(0);
+              password = s_general_ascii_buf.substring(0);
               break;
             //---------------------
             default:
@@ -885,15 +906,16 @@ void loop()
       break;
     //--------------------------------
     case S_WIFI_RECONNECT:
+      ESP.restart();  // just restart the board
       break;
     //--------------------------------
     case S_RUN_BEACON:
       //
-      timeout_cnt = 0; // do not allow to timeout this operation
       for (int j = 0; j < 10; j++) {
         pushBtnPressed = 0;
         for (int i = 0; i < sizeof(beacon_message_buf); i++) {
           morseEncode(beacon_message_buf[i]);
+          timeout_cnt = 0; // do not allow to timeout this operation
           if (pushBtnVal == PUSH_BTN_PRESSED) {
             pushBtnPressed = 1;
             break;
@@ -928,20 +950,20 @@ void IRAM_ATTR onTimer() {
 
   uint32_t incr_val;
   //
+  timeout_cnt++;
+  //
   if (ISR_cnt != 255) ISR_cnt++;
   //
-  keyerVal = digitalRead(KEYER_DASH) << 1 | digitalRead(KEYER_DOT);
-  //
+  keyerVal   = digitalRead(KEYER_DASH) << 1 | digitalRead(KEYER_DOT);
   pushBtnVal = digitalRead(ROTARY_ENC_PUSH);
   // SW debounce
   rotaryA_Val = (rotaryA_Val << 1 | (uint8_t)digitalRead(ROTARY_ENC_A)) & 0x0F;
   //
   // Rising edge --> 0001
   if (rotaryA_Val == 0x01) {
-    //timeout_cnt = 0;
     rotaryB_Val = digitalRead(ROTARY_ENC_B);
     // Rotation speedup
-    (ISR_cnt <= 20) ? cntIncrISR = RotaryEncISR.cntIncr << 4 : cntIncrISR = RotaryEncISR.cntIncr;
+    (ISR_cnt <= 12) ? cntIncrISR = RotaryEncISR.cntIncr << 4 : cntIncrISR = RotaryEncISR.cntIncr;
     ISR_cnt = 0;
     //
     if (rotaryB_Val == 0) {
@@ -991,7 +1013,7 @@ void setup() {
   RotaryEnc_FreqWord.cntMax  = FreqToRegWord(2400500000);
   RotaryEnc_FreqWord.cntIncr = 1;
 
-  RotaryEnc_MenuSelection    = {1000000, 0, 2000000, 1, 0};   // We will implement modulo to wrap around menu items
+  RotaryEnc_MenuSelection    = {1000000-3, 0, 2000000, 1, 0};   // We will implement modulo to wrap around menu items
   RotaryEnc_KeyerSpeedWPM    = {20, 10, 30, 1, 0};
   RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo
   RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
@@ -1005,18 +1027,17 @@ void setup() {
   // Get the counter value, if the key does not exist, return a default value of XY
   // Note: Key name is limited to 15 chars.
   RotaryEnc_KeyerSpeedWPM.cntVal    = preferences.getInt("KeyerWPM", 20);
+  speed = RotaryEnc_KeyerSpeedWPM.cntVal;
+  sspeed = String(speed);
+  Calc_WPM_dot_delay(RotaryEnc_KeyerSpeedWPM.cntVal);
   RotaryEnc_KeyerType.cntVal        = preferences.getInt("KeyerType", 0);
   RotaryEnc_OffsetHz.cntVal         = preferences.getInt("OffsetHz", 0);
   RotaryEnc_BuzzerFreq.cntVal       = preferences.getInt("BuzzerFreq", 600);
   RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower", PowerArrayMiliWatt_Size - 1); // Max output power
 
-  //mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???", 40);
-  //wifi_ssid_ascii_buf               = preferences.getString("MySSID", "SSID???", 40);
-  //wifi_pwd_ascii_buf                = preferences.getString("MyPWD",  "PWD???",  40);
-
   s_mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???");
-  s_wifi_ssid_ascii_buf               = preferences.getString("ssid", "SSID??");
-  s_wifi_pwd_ascii_buf                = preferences.getString("password",  "PWD???");
+  //s_wifi_ssid_ascii_buf               = preferences.getString("ssid", "SSID??");
+  //s_wifi_pwd_ascii_buf                = preferences.getString("password",  "PWD???");
 
   dhcp = preferences.getBool("dhcp", 1);
   con  = preferences.getBool("con", 0);
@@ -1029,10 +1050,7 @@ void setup() {
   sPrimaryDNS = preferences.getString("pdns", "8.8.8.8");
   sSecondaryDNS = preferences.getString("sdns", "8.8.4.4");
 
-  preferences.end();
-
-
-  Calc_WPM_dot_delay(RotaryEnc_KeyerSpeedWPM.cntVal);
+  //preferences.end();   -- do not call prefs.end since we assume writing to NV memory later in application
 
   RotaryEncPush(&RotaryEnc_FreqWord);
 
@@ -1042,16 +1060,25 @@ void setup() {
   }
 
 
+  // Initial splash screen
   display.clearDisplay();
-  display.fillRect(0, 0, SCREEN_WIDTH, 9, WHITE); // x, y, width, height
+  display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, BLACK); // x, y, width, height
   display.setTextSize(1);
-  display.setTextColor(BLACK);
-  display.setCursor(1, 1);
+  display.setTextColor(WHITE);
+  display.setCursor(1, 10);
   display.println(" QO-100 CW TX 2.4GHz");
+  display.setCursor(7, 20);
+  display.println("by OK1CDJ and OM2JU");
+  display.setCursor(13, 35);
+  display.println("http://hamshop.cz");
+  display.setCursor(10, 50);
+  display.println("Starting WiFi...");
   display.drawFastVLine(0, 0, SCREEN_HEIGHT, WHITE);
   display.drawFastVLine(SCREEN_WIDTH - 1, 0, SCREEN_HEIGHT, WHITE);
+  display.drawFastHLine(0, 0, SCREEN_WIDTH, WHITE);
+  display.drawFastHLine(0, SCREEN_HEIGHT-1, SCREEN_WIDTH, WHITE);
   display.display();
-  delay(200);
+  delay(500);
 
   //led_Flash(2, 125);                                       //two quick LED flashes to indicate program start
 
@@ -1079,7 +1106,6 @@ void setup() {
     led_Flash(1, 50);
     delay(30);
     led_Flash(1, 50 * 3);
-    //delay(125);
     led_Flash(1, 50);
   } else {
     Serial.println(F("No device responding"));
@@ -1128,14 +1154,16 @@ void setup() {
 
   LT.setTxParams(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][1], RADIO_RAMP_10_US);
 
+  //
+  xTaskCreatePinnedToCore(SendMorse, "Task1", 10000, NULL, 1, NULL,  0);
+
   
   
   // Try connect to WIFI
   if (!wifiConfigRequired)
   {
     WiFi.mode(WIFI_STA);
-    WiFi.begin("TP-Link","7812023527");
-    //WiFi.begin(ssid.c_str(), password.c_str());
+    WiFi.begin(ssid.c_str(), password.c_str());
     if (WiFi.waitForConnectResult() != WL_CONNECTED) {
       Serial.printf("WiFi Failed!\n");
       WiFi.disconnect();
@@ -1148,8 +1176,7 @@ void setup() {
     }
   }
 
-  // not connected and make AP
-
+// not connected and make AP
 if (wifiConfigRequired) {
 
     wifiConfigRequired = true;
@@ -1172,9 +1199,10 @@ if (wifiConfigRequired) {
       }
 
       if (request->hasParam(PARAM_SPEED)) {
-        //sspeed = request->getParam(PARAM_SPEED)->value();
-        //speed = sspeed.toInt();
+        sspeed = request->getParam(PARAM_SPEED)->value();
+        speed = sspeed.toInt();
         //update_speed();
+        Calc_WPM_dot_delay (speed);
       }
       request->send(SPIFFS, "/index.html", String(), false,   processor);
     }
@@ -1222,7 +1250,7 @@ if (wifiConfigRequired) {
     // http://192.168.1.118/cfg-save?apikey=1111&localip=192.168.1.200&subnet=255.255.255.0&gateway=192.168.1.1&pdns=8.8.8.8&sdns=8.8.4.4&ssid=TP-Link&password=
       request->send(200, "text/plain", "Config saved - SSID:" + ssid + " APIKEY: " + apikey + " restart in 5 seconds");
       savePrefs();
-      delay(5000);
+      delay(2000);
       ESP.restart();
       //request->redirect("/");
     }
@@ -1239,9 +1267,10 @@ if (wifiConfigRequired) {
       }
 
       if (request->hasParam(PARAM_SPEED)) {
-        //sspeed = request->getParam(PARAM_SPEED)->value();
-        //speed = sspeed.toInt();
+        sspeed = request->getParam(PARAM_SPEED)->value();
+        speed = sspeed.toInt();
         //update_speed();
+        Calc_WPM_dot_delay (speed);
       }
       request->send(200, "text/plain", "OK");
     } else request->send(401, "text/plain", "Unauthorized");
@@ -1312,9 +1341,12 @@ if (wifiConfigRequired) {
           case 2:  // set speed
             bb[0] = packet.data()[2];
             bb[1] = packet.data()[3];
-            //speed = atoi(bb);
-            //sspeed = String(speed);
+            speed = atoi(bb);
+            sspeed = String(speed);
             //update_speed();
+            Calc_WPM_dot_delay (speed);
+            //Serial.print("UDP Speed: ");
+            //Serial.print(bb);
             break;
 
           default:
@@ -1324,7 +1356,10 @@ if (wifiConfigRequired) {
 
       } else {
         udpdataString.toUpperCase();
-        //message += udpdataString;
+        message += udpdataString;
+        //Serial.print("UDP TX: ");
+        //Serial.print(udpdataString);
+
       }
 
     });
@@ -1335,7 +1370,7 @@ if (wifiConfigRequired) {
 
 
 //
-// JU: Modified function to set frequency since definition of FREQ_STEP was not precise enough (198.364 - should be 50e6/2**18=198.3642578125)
+// JU: Modified function to set frequency since definition of FREQ_STEP was not precise enough (198.364 - should be 52e6/2**18=198.3642578125)
 #define FREQ_STEP_JU 198.3642578125
 
 void JUsetRfFrequency(uint32_t frequency, int32_t offset)
