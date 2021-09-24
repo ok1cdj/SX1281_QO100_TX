@@ -315,14 +315,14 @@ void Calc_WPM_dot_delay ( uint32_t wpm) {
 
 // Send CW tone with duration duration_ms
 void sendCW(uint16_t duration_ms) {
-  //digitalWrite(LED1, HIGH);
-  ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
+  digitalWrite(LED1, LOW);
+  ledcWriteTone(9, RotaryEnc_BuzzerFreq.cntVal);
   LT.writeCommand(RADIO_SET_FS, 0, 0);
   LT.txEnable();
   LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
   delay(duration_ms);
-  ledcWriteTone(3, 0);
-  digitalWrite(LED1, LOW);
+  ledcWriteTone(9, 0);
+  digitalWrite(LED1, HIGH);
   LT.setMode(MODE_STDBY_RC); // This should terminate TXCONTINUOUSWAVE
   LT.rxEnable();
 }
@@ -338,8 +338,8 @@ void sendCW(uint16_t duration_ms) {
 //
 // Start CW - from FS to TX mode
 void startCW() {
-  //digitalWrite(LED1, HIGH);
-  ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
+  digitalWrite(LED1, LOW);
+  ledcWriteTone(9, RotaryEnc_BuzzerFreq.cntVal);
   //  LT.writeCommand(RADIO_SET_FS, 0, 0);
   //  LT.txEnable();
   LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
@@ -347,8 +347,8 @@ void startCW() {
 
 // Stop CW - from TX to FS mode
 void stopCW() {
-  ledcWriteTone(3, 0);
-  digitalWrite(LED1, LOW);
+  digitalWrite(LED1, HIGH);
+  ledcWriteTone(9, 0);
   LT.writeCommand(RADIO_SET_FS, 0, 0);
   //LT.setMode(MODE_STDBY_RC); // This should terminate TXCONTINUOUSWAVE
   //LT.rxEnable();
@@ -360,11 +360,11 @@ void led_Flash(uint16_t flashes, uint16_t delaymS)
   uint16_t index;
   for (index = 1; index <= flashes; index++)
   {
-    //digitalWrite(LED1, HIGH);
-    ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
-    delay(delaymS);
-    ledcWriteTone(3, 0);
     digitalWrite(LED1, LOW);
+    ledcWriteTone(9, RotaryEnc_BuzzerFreq.cntVal);
+    delay(delaymS);
+    ledcWriteTone(9, 0);
+    digitalWrite(LED1, HIGH);
     delay(delaymS);
   }
 }
@@ -416,6 +416,9 @@ void notFound(AsyncWebServerRequest *request) {
 
 // process replacement in html pages
 String processor(const String& var) {
+  if (var == "FRQ") {
+    return freq_ascii_buf;
+  }
   if (var == "SPEED") {
     return sspeed;
   }
@@ -827,9 +830,9 @@ void loop()
         display.print(RotaryEncISR.cntVal);
         display.display();
         // Short beep with new tone value
-        ledcWriteTone(3, RotaryEncISR.cntVal);
+        ledcWriteTone(9, RotaryEncISR.cntVal);
         delay(100);
-        ledcWriteTone(3, 0);
+        ledcWriteTone(9, 0);
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
       //
@@ -995,12 +998,12 @@ void setup() {
   pinMode(KEYER_DASH,      INPUT_PULLUP);
   pinMode(TCXO_EN, OUTPUT);
   digitalWrite(TCXO_EN, 1);
-  // pinMode(LED1, OUTPUT);                                   //setup pin as output for indicator LED
+  pinMode(LED1, OUTPUT);                                   //setup pin as output for indicator LED
   //
   // Configure BUZZER functionalities.
-  ledcSetup(3, 8000, 8);   //PWM Channel, Freq, Resolution
+  ledcSetup(9, 8000, 8);   //PWM Channel, Freq, Resolution
   /// Attach BUZZER pin.
-  ledcAttachPin(BUZZER, 3);  // Pin, Channel
+  ledcAttachPin(BUZZER,9);  // Pin, Channel
 
   // Timer for ISR which is processing rotary encoder events
   timer = timerBegin(0, 80, true);
@@ -1155,7 +1158,7 @@ void setup() {
   LT.setTxParams(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][1], RADIO_RAMP_10_US);
 
   //
-  xTaskCreatePinnedToCore(SendMorse, "Task1", 10000, NULL, 1, NULL,  0);
+  xTaskCreatePinnedToCore(SendMorse, "Task1", 20000, NULL, 1, NULL,  0);
 
   
   
@@ -1164,6 +1167,7 @@ void setup() {
   {
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), password.c_str());
+   
     if (WiFi.waitForConnectResult() != WL_CONNECTED) {
       Serial.printf("WiFi Failed!\n");
       WiFi.disconnect();
@@ -1195,7 +1199,7 @@ if (wifiConfigRequired) {
     if ((request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) || wifiConfigRequired) {
 
       if (request->hasParam(PARAM_MESSAGE)) {
-        //message = request->getParam(PARAM_MESSAGE)->value();
+        message = request->getParam(PARAM_MESSAGE)->value();
       }
 
       if (request->hasParam(PARAM_SPEED)) {
