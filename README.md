@@ -15,7 +15,7 @@ Maybe some digi modes possible in the future (RTTY,  Hellschreiber )
 - Beacon mode
 - cwdaemon compatible UDP server on port 6789
 - WiFi client or AP mode
-- Web interface for Wifi config
+- Web interface for WiFi config
 - Web interafce for tuning, change speed and power - not fully functional yet
 
 
