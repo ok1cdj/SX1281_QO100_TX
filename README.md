@@ -5,6 +5,17 @@ https://www.nicerf.com/products/detail/500mw-2-4ghz-lora-wireless-transceiver-mo
 
 Maybe some digi modes possible in the future (RTTY,  Hellschreiber )
 
+## Features
+- Paddle input -IAMBIC keyer
+- Straight key input
+- Change frequency, power, keyer speed by rotary encoder
+- Frequency callibration
+- Beacon mode
+- cwdaemon compatible UDP server on port 6789
+- WiFi client or AP mode
+- Web interface for Wifi config
+- Web interafce for tuning, change speed and power - not fully functional yet
+
 
 ## Used libraries
 Adafruit GFX Library
