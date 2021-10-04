@@ -13,9 +13,9 @@
     <script>
         var mousewheelevt = (/Firefox/i.test(navigator.userAgent)) ? "DOMMouseScroll" : "mousewheel";
 
-        var MIN = 240000000;
-        var STEP = 168;
-        var MAX = 240500000;
+        var MIN = 2400000000;
+        var STEP = 198.3642578125;
+        var MAX = 2400500000;
 
         $(document).ready(function () {
             var change = function (type) {
@@ -71,17 +71,17 @@
             <h1>QO-100 TX</h1>
         </div>
         <div class="card-body">
-
+	 <form method="GET" action="/" id="form">
             <div class="d-flex justify-content-end">
                
-                <div style="max-width: 180px" class="mx-1">
+                <div style="max-width: 200px" class="mx-1">
                     <div class="input-group">
                         <button class="btn btn btn-outline-success" type="button" id="incrementMinus"
                                 style="min-width: 31px">
                             -
                         </button>
                         <input type="text" class="form-control form-control text-center" id="incrementInput"
-                               value="%FRQ%">
+                               name=frq value="%FRQ%">
                         <button class="btn  btn btn-outline-success" type="button" id="incrementPlus"
                                 style="min-width: 31px">
                             +
@@ -102,7 +102,7 @@
                 </a>
             </div>
 
-            <form method="GET" action="/" id="form">
+           
                 <input type="hidden" class="form-control" id="apikey" name="apikey" value="%APIKEY%">
                 <div class="form-group">
                     <label for="message">Text</label>
@@ -119,8 +119,8 @@
                 </div>
                 <div class="d-flex justify-content-center m-2">
                     <input type="submit" value="Send" class="btn btn-primary m-3">
-                    <input type="button" value="Break" class="btn btn-warning m-3" onclick="submitByButton()">
-		    <input type="button" value="Tune" class="btn btn-danger m-3" onclick="cfg/?apikey=%APIKEY%">	
+                    <input type="button" value="Break" class="btn btn-warning m-3" onclick="javascript:location.href='/?apikey=%APIKEY%&speed=%SPEED%&message='"">
+		    <input type="button" value="Tune" class="btn btn-danger m-3" onclick="javascript:location.href='/?apikey=%APIKEY%&speed=%SPEED%&message='">	
                 </div>
             </form>
         </div>

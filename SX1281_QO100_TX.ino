@@ -72,6 +72,8 @@ String sGateway   = "";
 String sSubnet    = "";
 String sPrimaryDNS = "";
 String sSecondaryDNS = "";
+String wifiNetworkList = "";
+String spwr = "";
 
 String message;
 String sspeed = "20";
@@ -80,6 +82,7 @@ uint32_t speed = 20;
 // web server requests
 const char* PARAM_MESSAGE = "message";
 const char* PARAM_SPEED = "speed";
+const char* PARAM_PWR = "pwr";
 const char* PARAM_SSID = "ssid";
 const char* PARAM_PASSWORD = "password";
 const char* PARAM_APIKEY = "apikey";
@@ -90,6 +93,8 @@ const char* PARAM_GATEWAY = "gateway";
 const char* PARAM_PDNS = "pdns";
 const char* PARAM_SDNS = "sdns";
 const char* PARAM_LOCALIP = "localip";
+
+
 
 
 bool wifiConfigRequired = false;
@@ -417,58 +422,68 @@ void notFound(AsyncWebServerRequest *request) {
 // process replacement in html pages
 String processor(const String& var) {
   if (var == "FRQ") {
-    return freq_ascii_buf;
+    return String(RegWordToFreq(RotaryEncISR.cntVal));
   }
   if (var == "SPEED") {
     return sspeed;
   }
   if (var == "NETWORKS" ) {
+    return wifiNetworkList;
+  }
+
+  if (var == "PWR" ) {
     String rsp;
-    int n = WiFi.scanNetworks();
+    String pwsi;
+    String pwst;
+    int n = 5;
     for (int i = 0; i < n; ++i) {
-      rsp += "<option value=\"" + WiFi.SSID(i) + "\">" + WiFi.SSID(i) + " (RSSI: " + WiFi.RSSI(i) + ")</option>";
+      pwsi = String(PowerArrayMiliWatt[i][1]);
+      pwst = String(PowerArrayMiliWatt[i][0]);
+      rsp += "<option value=\"" + pwsi + "\" ";
+      if ((PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][1] == pwsi.toInt()) && spwr.length() == 0)  rsp += "SELECTED";
+      if (spwr.toInt() == pwsi.toInt())  rsp += "SELECTED";
+      rsp += ">" + pwst + "</option>";
     }
     return rsp;
   }
-
 
   if (var == "APIKEY") {
     return apikey;
   }
 
-if (var == "DHCP") {
+  if (var == "DHCP") {
 
-  String rsp = "";
-  if (dhcp) rsp = "checked";
+    String rsp = "";
+    if (dhcp) rsp = "checked";
 
-  return  rsp;
-}
+    return  rsp;
+  }
 
 
-if (var == "LOCALIP") {
-  return sIP;
-}
-if (var == "SUBNET") {
-  return sSubnet;
-}
+  if (var == "LOCALIP") {
+    return sIP;
+  }
+  if (var == "SUBNET") {
+    return sSubnet;
+  }
 
-if (var == "GATEWAY") {
-  return sGateway;
-}
+  if (var == "GATEWAY") {
+    return sGateway;
+  }
 
-if (var == "PDNS") {
-  return sPrimaryDNS;
-}
-if (var == "SDNS") {
-  return sSecondaryDNS;
-}
+  if (var == "PDNS") {
+    return sPrimaryDNS;
+  }
+  if (var == "SDNS") {
+    return sSecondaryDNS;
+  }
 
-return String();
+  return String();
 }
 
 void savePrefs()
 {
-  //preferences.begin("my-app", false);    -- We assume this has been already called 
+  //preferences.begin("my-app", false);    -- We assume this has been already called
   preferences.putString("ssid", ssid);
   preferences.putString("password", password);
   preferences.putString("apikey", apikey);
@@ -519,7 +534,7 @@ void loop()
       delay(10);
     }
     // Keyer released
-    if ((keyerVal & 0x01) == 1) {
+    if ((keyerVal & 0x01 == 1) && (keyerCWstarted == 1)) {
       keyerCWstarted = 0;
       stopCW();
       delay(10);
@@ -547,19 +562,19 @@ void loop()
       delay(WPM_dot_delay);
     }
   }
-   // Process timeout for display items other than main screen
-   if (program_state != S_RUN_RUN) {
-     if (timeout_cnt > 6000) {
-       display_valuefield_clear();
-       display_valuefield_begin();
-       display.print("Timeout...");
-       display.display();
-       delay(600);
-       timeout_cnt=0;
-       RotaryEncPush(&RotaryEnc_FreqWord);
-       program_state = S_RUN;
-     }
-   }
+  // Process timeout for display items other than main screen
+  if (program_state != S_RUN_RUN) {
+    if (timeout_cnt > 6000) {
+      display_valuefield_clear();
+      display_valuefield_begin();
+      display.print("Timeout...");
+      display.display();
+      delay(600);
+      timeout_cnt = 0;
+      RotaryEncPush(&RotaryEnc_FreqWord);
+      program_state = S_RUN;
+    }
+  }
   //
   // Main FSM
   //-----------------------------------------
@@ -847,7 +862,9 @@ void loop()
     //--------------------------------
     case S_SET_TEXT_GENERIC:
       // Reset timeout_cnt when there is activity with encoder
-      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) { timeout_cnt = 0; }
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        timeout_cnt = 0;
+      }
       limitRotaryEncISR_values();
       display_valuefield_begin();
       // Blinking effect on selected character
@@ -944,6 +961,7 @@ void loop()
 }  // loop
 
 
+
 void IRAM_ATTR onTimer() {
   //portENTER_CRITICAL_ISR(&timerMux);
   //interruptCounter++;
@@ -985,12 +1003,12 @@ void IRAM_ATTR onTimer() {
 
 
 void setup() {
-   
-   if (!SPIFFS.begin()) {
+
+  if (!SPIFFS.begin()) {
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
   }
-  
+
   pinMode(ROTARY_ENC_A,    INPUT_PULLUP);
   pinMode(ROTARY_ENC_B,    INPUT_PULLUP);
   pinMode(ROTARY_ENC_PUSH, INPUT_PULLUP);
@@ -1003,7 +1021,7 @@ void setup() {
   // Configure BUZZER functionalities.
   ledcSetup(9, 8000, 8);   //PWM Channel, Freq, Resolution
   /// Attach BUZZER pin.
-  ledcAttachPin(BUZZER,9);  // Pin, Channel
+  ledcAttachPin(BUZZER, 9); // Pin, Channel
 
   // Timer for ISR which is processing rotary encoder events
   timer = timerBegin(0, 80, true);
@@ -1016,13 +1034,14 @@ void setup() {
   RotaryEnc_FreqWord.cntMax  = FreqToRegWord(2400500000);
   RotaryEnc_FreqWord.cntIncr = 1;
 
-  RotaryEnc_MenuSelection    = {1000000-3, 0, 2000000, 1, 0};   // We will implement modulo to wrap around menu items
+  RotaryEnc_MenuSelection    = {1000000 - 3, 0, 2000000, 1, 0}; // We will implement modulo to wrap around menu items
   RotaryEnc_KeyerSpeedWPM    = {20, 10, 30, 1, 0};
   RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo
   RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
   RotaryEnc_BuzzerFreq       = {600, 0, 2000, 100, 0};
   RotaryEnc_OutPowerMiliWatt = {PowerArrayMiliWatt_Size - 1, 0, PowerArrayMiliWatt_Size - 1, 1, 0};
   RotaryEnc_TextInput_Char_Index  = {65, 33, 127, 1, 66};
+
 
 
   // Get configuration values stored in EEPROM/FLASH
@@ -1046,7 +1065,7 @@ void setup() {
   con  = preferences.getBool("con", 0);
   ssid = preferences.getString("ssid");
   password = preferences.getString("password");
-  apikey = preferences.getString("apikey","1111");
+  apikey = preferences.getString("apikey", "1111");
   sIP        = preferences.getString("ip", "192.168.1.200");
   sGateway   = preferences.getString("gateway", "192.168.1.1");
   sSubnet    = preferences.getString("subnet", "255.255.255.0");
@@ -1079,7 +1098,7 @@ void setup() {
   display.drawFastVLine(0, 0, SCREEN_HEIGHT, WHITE);
   display.drawFastVLine(SCREEN_WIDTH - 1, 0, SCREEN_HEIGHT, WHITE);
   display.drawFastHLine(0, 0, SCREEN_WIDTH, WHITE);
-  display.drawFastHLine(0, SCREEN_HEIGHT-1, SCREEN_WIDTH, WHITE);
+  display.drawFastHLine(0, SCREEN_HEIGHT - 1, SCREEN_WIDTH, WHITE);
   display.display();
   delay(500);
 
@@ -1160,14 +1179,24 @@ void setup() {
   //
   xTaskCreatePinnedToCore(SendMorse, "Task1", 20000, NULL, 1, NULL,  0);
 
-  
-  
+
+
+  Serial.println(RegWordToFreq(RotaryEncISR.cntVal));
+
+  //Scan for WIFI networks before config to avoid reset when it takes long time...
+  Serial.println(F("Scanning for WIFI..."));
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; ++i) {
+    Serial.println(WiFi.SSID(i) + ' ' + WiFi.RSSI(i));
+    wifiNetworkList += "<option value=\"" + WiFi.SSID(i) + "\">" + WiFi.SSID(i) + " (RSSI: " + WiFi.RSSI(i) + ")</option>";
+  }
+  Serial.println(F("Done."));
   // Try connect to WIFI
   if (!wifiConfigRequired)
   {
     WiFi.mode(WIFI_STA);
+    Serial.println("Trying connect to " + ssid);
     WiFi.begin(ssid.c_str(), password.c_str());
-   
     if (WiFi.waitForConnectResult() != WL_CONNECTED) {
       Serial.printf("WiFi Failed!\n");
       WiFi.disconnect();
@@ -1180,8 +1209,8 @@ void setup() {
     }
   }
 
-// not connected and make AP
-if (wifiConfigRequired) {
+  // not connected and make AP
+  if (wifiConfigRequired) {
 
     wifiConfigRequired = true;
     Serial.println("Start AP");
@@ -1194,7 +1223,7 @@ if (wifiConfigRequired) {
   }
 
 
-   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
 
     if ((request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) || wifiConfigRequired) {
 
@@ -1205,8 +1234,12 @@ if (wifiConfigRequired) {
       if (request->hasParam(PARAM_SPEED)) {
         sspeed = request->getParam(PARAM_SPEED)->value();
         speed = sspeed.toInt();
-        //update_speed();
         Calc_WPM_dot_delay (speed);
+      }
+
+      if (request->hasParam(PARAM_PWR)) {
+        spwr = request->getParam(PARAM_PWR)->value();
+
       }
       request->send(SPIFFS, "/index.html", String(), false,   processor);
     }
@@ -1239,19 +1272,19 @@ if (wifiConfigRequired) {
   {
     if (request->hasParam("ssid") && request->hasParam("password") && request->hasParam("apikey")) {
       ssid = request->getParam(PARAM_SSID)->value();
-      if(request->getParam(PARAM_PASSWORD)->value()!=NULL) password = request->getParam(PARAM_PASSWORD)->value();
+      if (request->getParam(PARAM_PASSWORD)->value() != NULL) password = request->getParam(PARAM_PASSWORD)->value();
       apikey = request->getParam(PARAM_APIKEY)->value();
 
-      if(request->hasParam("dhcp")) dhcp = true; else dhcp=false;  
-      if(request->hasParam("localip")) sIP = request->getParam(PARAM_LOCALIP)->value();
-      if(request->hasParam("gateway")) sGateway   = request->getParam(PARAM_GATEWAY)->value();
-      if(request->hasParam("subnet")) sSubnet    = request->getParam(PARAM_SUBNET)->value();
-      if(request->hasParam("pdns")) sPrimaryDNS = request->getParam(PARAM_PDNS)->value();
-      if(request->hasParam("sdns")) sSecondaryDNS = request->getParam(PARAM_SDNS)->value();
-      if(request->hasParam("con")) con = true; else con=false;
-      
-    // http://192.168.1.118/cfg-save?apikey=1111&dhcp=on&ssid=TP-Link&password=
-    // http://192.168.1.118/cfg-save?apikey=1111&localip=192.168.1.200&subnet=255.255.255.0&gateway=192.168.1.1&pdns=8.8.8.8&sdns=8.8.4.4&ssid=TP-Link&password=
+      if (request->hasParam("dhcp")) dhcp = true; else dhcp = false;
+      if (request->hasParam("localip")) sIP = request->getParam(PARAM_LOCALIP)->value();
+      if (request->hasParam("gateway")) sGateway   = request->getParam(PARAM_GATEWAY)->value();
+      if (request->hasParam("subnet")) sSubnet    = request->getParam(PARAM_SUBNET)->value();
+      if (request->hasParam("pdns")) sPrimaryDNS = request->getParam(PARAM_PDNS)->value();
+      if (request->hasParam("sdns")) sSecondaryDNS = request->getParam(PARAM_SDNS)->value();
+      if (request->hasParam("con")) con = true; else con = false;
+
+      // http://192.168.1.118/cfg-save?apikey=1111&dhcp=on&ssid=TP-Link&password=
+      // http://192.168.1.118/cfg-save?apikey=1111&localip=192.168.1.200&subnet=255.255.255.0&gateway=192.168.1.1&pdns=8.8.8.8&sdns=8.8.4.4&ssid=TP-Link&password=
       request->send(200, "text/plain", "Config saved - SSID:" + ssid + " APIKEY: " + apikey + " restart in 5 seconds");
       savePrefs();
       delay(2000);
@@ -1267,7 +1300,7 @@ if (wifiConfigRequired) {
   server.on("/sendmorse", HTTP_GET, [] (AsyncWebServerRequest * request) {
     if (request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) {
       if (request->hasParam(PARAM_MESSAGE)) {
-       // message = request->getParam(PARAM_MESSAGE)->value();
+        // message = request->getParam(PARAM_MESSAGE)->value();
       }
 
       if (request->hasParam(PARAM_SPEED)) {
