@@ -5,6 +5,8 @@ https://www.nicerf.com/products/detail/500mw-2-4ghz-lora-wireless-transceiver-mo
 
 Maybe some digi modes possible in the future (RTTY,  Hellschreiber )
 
+*Maximal power output is 450mW. It is enought to work over satellite with 60cm DISH, but tested also with 35cm and helix feed.*
+
 ## Features
 - Paddle input -IAMBIC keyer
 - Straight key input
