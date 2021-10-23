@@ -13,15 +13,20 @@
     <script>
         var mousewheelevt = (/Firefox/i.test(navigator.userAgent)) ? "DOMMouseScroll" : "mousewheel";
 
-        var MIN = 2400000000;
-        var STEP = 198.3642578125;
-        var MAX = 2400500000;
+        const MIN = 12098954;   // floor(2400000000 / STEP) + 1
+        const MAX = 12101474;   // 2400500000 / STEP
+        const STEP = 198.3642578125;
+        var newVal; // = 12099054;
+        var freqIndex = 0;
+        var freqIndexOld = 1;
+        var newVal_freq;
+        var newVal_freq_with_commas;
 
         $(document).ready(function () {
             var change = function (type) {
-                var input = $('#incrementInput');
+                var input = $('#frq_index_input');
                 var val = parseInt(input.val());
-                var newVal = 0;
+                newVal = 0;
                 if (!val) {
                     val = MIN;
                     if (!val) {
@@ -30,17 +35,17 @@
                 }
 
                 if (type === '+') {
-                    newVal = val + STEP;
+                    newVal = val + 1;
                     if (MAX && newVal > MAX) {
                         newVal = MAX;
                     }
                 } else if (type === '-') {
-                    newVal = val - STEP;
+                    newVal = val - 1;
                     if (MIN && newVal < MIN) {
                         newVal = MIN;
                     }
                 }
-                input.val(newVal, 2);
+                input.val(newVal, 0);
             };
             $('body').bind(mousewheelevt, 'mousewheel', function (e) {
                 if (e.originalEvent.wheelDelta / 120 > 0) {
@@ -59,37 +64,61 @@
                 change('+')
             });
         });
+
+	setInterval(updatefreqValue, 500);
+
+    function updatefreqValue() {
+	  freqIndex = document.getElementById("frq_index_input").value;
+	  if (freqIndex != freqIndexOld) {
+	    newVal_freq = (freqIndex * STEP);
+		newVal_freq_with_commas = numberWithCommas(newVal_freq.toFixed(0));
+        document.getElementById('freq_val').innerHTML=newVal_freq_with_commas;
+		document.getElementById('freq_val').style.visibility = 'visible';
+	  }
+	  freqIndexOld = freqIndex;
+    }
+
+	function numberWithCommas(x) {
+      var parts = x.toString().split(".");
+      parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      return parts.join(".");
+    }
+
+
     </script>
 
 </head>
 <body>
 
-
 <div class="d-flex justify-content-center m-md-5">
     <div class="card">
         <div class="card-header bg-dark text-white text-center">
             <h1>QO-100 TX</h1>
+            <h2>%MYCALL%</h2>
         </div>
         <div class="card-body">
-	 <form method="GET" action="/" id="form">
+
+			<form method="GET" action="/" name="myForm" id="myForm">
             <div class="d-flex justify-content-end">
                
                 <div style="max-width: 200px" class="mx-1">
+                    
                     <div class="input-group">
                         <button class="btn btn btn-outline-success" type="button" id="incrementMinus"
                                 style="min-width: 31px">
                             -
                         </button>
-                        <input type="text" class="form-control form-control text-center" id="incrementInput"
-                               name=frq value="%FRQ%">
+                        
+                        <div style="visibility:hidden;padding-left:8px;padding-right:8px;" id="freq_val">2.400.000.000</div> 
+					    
                         <button class="btn  btn btn-outline-success" type="button" id="incrementPlus"
-                                style="min-width: 31px">
+                                style="min-width:31px;">
                             +
                         </button>			
                     </div>	
                 </div>
-			<div style="max-width: 150px" class="mx-1">
-                   	 <select class="form-select" id="pwr" name="pwr" aria-label="PWR select" size="1" >
+			<div style="max-width:150px;padding-left:60px;" class="mx-1">
+                   	 <select class="form-select" id="pwr" name="pwr" aria-label="PWR select" size="1" onchange="this.form.submit();">
                         %PWR%
                     </select>
 		</div>
@@ -113,16 +142,26 @@
                     <div class="d-flex w-100 align-items-center">
                         <input type="range" class="form-range" id="speed" name="speed" min="10" max="40" value="%SPEED%"
                                step="1"
-                               onchange="document.getElementById('sped-value').innerHTML = value + ''">
+                               onchange="this.form.submit();">
                         <span class="p-1" id="sped-value">%SPEED%</span>WPM
                     </div>
                 </div>
                 <div class="d-flex justify-content-center m-2">
-                    <input type="submit" value="Send" class="btn btn-primary m-3">
-                    <input type="button" value="Break" class="btn btn-warning m-3" onclick="javascript:location.href='/?apikey=%APIKEY%&speed=%SPEED%&message='"">
-		    <input type="button" value="Tune" class="btn btn-danger m-3" onclick="javascript:location.href='/?apikey=%APIKEY%&speed=%SPEED%&message='">	
-                </div>
+                    <input type="submit" value="Send"  class="btn btn-primary m-3">
+                    <input type="submit" value="Break" name="cmd_B" class="btn btn-warning m-3">
+		            <input type="submit" value="Tune"  name="cmd_T" class="btn btn-danger m-3">
+		            <input type="submit" value="CQ"    name="cmd_C" class="btn btn-info m-3">
+				</div>
+
+                <input type="hidden" size="0" class="form-control form-control text-center" id="frq_index_input"
+                name="frq_index" value="%FRQ_INDEX%">
+
             </form>
+            <div style="margin-left:auto;margin-right:auto;">
+					<!-- JU: This button must be outside of form so that only apikey is sent -->
+                    <button class="btn btn-primary m-3" onClick="window.location.href = location.protocol + '//' + location.host + location.pathname +'?apikey=%APIKEY%';">Reload</button>
+
+            </div>
         </div>
     </div>
 </div>
