@@ -77,10 +77,13 @@ String spwr = "";
 
 String message;
 String sspeed = "20";
+String sfreq;
+String scmd;
 uint32_t speed = 20;
 
 // web server requests
 const char* PARAM_MESSAGE = "message";
+const char* PARAM_FRQ_INDEX = "frq_index";
 const char* PARAM_SPEED = "speed";
 const char* PARAM_PWR = "pwr";
 const char* PARAM_SSID = "ssid";
@@ -93,6 +96,9 @@ const char* PARAM_GATEWAY = "gateway";
 const char* PARAM_PDNS = "pdns";
 const char* PARAM_SDNS = "sdns";
 const char* PARAM_LOCALIP = "localip";
+const char* PARAM_CMD_B = "cmd_B";
+const char* PARAM_CMD_C = "cmd_C";
+const char* PARAM_CMD_T = "cmd_T";
 
 
 
@@ -421,8 +427,11 @@ void notFound(AsyncWebServerRequest *request) {
 
 // process replacement in html pages
 String processor(const String& var) {
-  if (var == "FRQ") {
-    return String(RegWordToFreq(RotaryEncISR.cntVal));
+  if (var == "FRQ_INDEX") {
+    return String(RotaryEncISR.cntVal);
+  }
+  if (var == "MYCALL") {
+    return s_mycall_ascii_buf;
   }
   if (var == "SPEED") {
     return sspeed;
@@ -431,7 +440,7 @@ String processor(const String& var) {
     return wifiNetworkList;
   }
 
-  if (var == "PWR" ) {
+  if (var == "PWRxx" ) {
     String rsp;
     String pwsi;
     String pwst;
@@ -446,6 +455,22 @@ String processor(const String& var) {
     }
     return rsp;
   }
+
+
+  if (var == "PWR" ) {
+    String rsp;
+    String pwst;
+    int n = 5;
+    for (int i = 0; i < n; ++i) {
+      pwst = String(PowerArrayMiliWatt[i][0]);
+      rsp += "<option value=\"" + String(i) + "\" ";
+      if (RotaryEnc_OutPowerMiliWatt.cntVal == i)  rsp += "SELECTED";
+      rsp += ">" + pwst + "</option>";
+    }
+    return rsp;
+  }
+
+
 
   if (var == "APIKEY") {
     return apikey;
@@ -1035,7 +1060,7 @@ void setup() {
   RotaryEnc_FreqWord.cntIncr = 1;
 
   RotaryEnc_MenuSelection    = {1000000 - 3, 0, 2000000, 1, 0}; // We will implement modulo to wrap around menu items
-  RotaryEnc_KeyerSpeedWPM    = {20, 10, 30, 1, 0};
+  RotaryEnc_KeyerSpeedWPM    = {20, 10, 40, 1, 0};
   RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo
   RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
   RotaryEnc_BuzzerFreq       = {600, 0, 2000, 100, 0};
@@ -1226,22 +1251,70 @@ void setup() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
 
     if ((request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) || wifiConfigRequired) {
-
-      if (request->hasParam(PARAM_MESSAGE)) {
-        message = request->getParam(PARAM_MESSAGE)->value();
+      // Freq. Index
+      if (request->hasParam(PARAM_FRQ_INDEX)) {
+        sfreq = request->getParam(PARAM_FRQ_INDEX)->value();
+        RotaryEncISR.cntVal = sfreq.toInt();
+        Serial.print("Freq changed: ");
+        Serial.println(sfreq);
+        RotaryEncISR.cntValOld++;   // Change Old value in order to force display update
+        program_state = S_RUN;
       }
-
+      // Speed WPM
       if (request->hasParam(PARAM_SPEED)) {
         sspeed = request->getParam(PARAM_SPEED)->value();
         speed = sspeed.toInt();
+        RotaryEnc_KeyerSpeedWPM.cntVal = speed;
         Calc_WPM_dot_delay (speed);
+        program_state = S_RUN;
+        RotaryEncISR.cntValOld++;   // Change Old value in order to force display update
       }
-
+      // Output Power
       if (request->hasParam(PARAM_PWR)) {
         spwr = request->getParam(PARAM_PWR)->value();
-
+        Serial.print("Power changed: ");
+        Serial.println(spwr);
+        RotaryEnc_OutPowerMiliWatt.cntVal = spwr.toInt();
+        LT.setTxParams(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][1], RADIO_RAMP_10_US);
+        RotaryEncISR.cntValOld++;   // Change Old value in order to force display update
+        program_state = S_RUN;
       }
+      // Message
+      if (request->hasParam(PARAM_MESSAGE)) {
+        message = "  ";   // Some delay at start of the message to mask irregular playing whn MCU still processes HTTP requests
+        message += request->getParam(PARAM_MESSAGE)->value();
+      }
+      // Break
+      if (request->hasParam(PARAM_CMD_B)) {
+        scmd = request->getParam(PARAM_CMD_B)->value();
+        if (scmd.charAt(0) == 'B') {
+          message  = "";
+          stopCW();
+        }
+      }
+      // CQ
+      if (request->hasParam(PARAM_CMD_C)) {
+        scmd = request->getParam(PARAM_CMD_C)->value();
+        if (scmd.charAt(0) == 'C') {
+          message = "  ";   // Some delay at start of the message to mask irregular playing whn MCU still processes HTTP requests
+          message += cq_message_buf;
+          message += s_mycall_ascii_buf;
+          message += message;
+          message += cq_message_end_buf;
+        }
+      }
+      // Tune
+      if (request->hasParam(PARAM_CMD_T)) {
+        scmd = request->getParam(PARAM_CMD_T)->value();
+        if (scmd.charAt(0) == 'T') {
+          startCW();
+          delay(3000);
+          stopCW();
+        }
+      }      
+
       request->send(SPIFFS, "/index.html", String(), false,   processor);
+
     }
     else {
       request->send(401, "text/plain", "Unauthorized");
@@ -1306,8 +1379,10 @@ void setup() {
       if (request->hasParam(PARAM_SPEED)) {
         sspeed = request->getParam(PARAM_SPEED)->value();
         speed = sspeed.toInt();
+        RotaryEnc_KeyerSpeedWPM.cntVal = speed;
         //update_speed();
         Calc_WPM_dot_delay (speed);
+        display_status_bar();
       }
       request->send(200, "text/plain", "OK");
     } else request->send(401, "text/plain", "Unauthorized");
@@ -1367,6 +1442,7 @@ void setup() {
       Serial.write(packet.data(), packet.length());
       Serial.println();
       String udpdataString = (const char*)packet.data();
+      udpdataString = udpdataString.substring(0, packet.length());
       char bb[2];
       int command = (int)packet.data()[1] - 48;
       if (packet.data()[0] == 27) {
@@ -1381,7 +1457,9 @@ void setup() {
             speed = atoi(bb);
             sspeed = String(speed);
             //update_speed();
+            RotaryEnc_KeyerSpeedWPM.cntVal = speed;
             Calc_WPM_dot_delay (speed);
+            display_status_bar();
             //Serial.print("UDP Speed: ");
             //Serial.print(bb);
             break;
