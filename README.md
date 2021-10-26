@@ -16,7 +16,9 @@ Maybe some digi modes possible in the future (RTTY,  Hellschreiber )
 - cwdaemon compatible UDP server on port 6789
 - WiFi client or AP mode
 - Web interface for WiFi config
-- Web interafce for tuning, change speed and power - not fully functional yet
+- Web interafce for tuning, change speed and power
+
+![alt text](https://raw.githubusercontent.com/ok1cdj/SX1281_QO100_TX/main/img/QO100-tx-purple.png)
 
 
 ## Used libraries
@@ -29,4 +31,7 @@ SX12XX Library - https://github.com/StuartsProjects/SX12XX-LoRa
 ESPAsyncWebServer - https://github.com/me-no-dev/ESPAsyncWebServer
 
 AsyncTCP - https://github.com/me-no-dev/AsyncTCP
+
+## User interface
+![alt text](https://raw.githubusercontent.com/ok1cdj/SX1281_QO100_TX/main/img/QO100-tx.png)
 
