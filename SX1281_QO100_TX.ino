@@ -99,6 +99,9 @@ const char* PARAM_LOCALIP = "localip";
 const char* PARAM_CMD_B = "cmd_B";
 const char* PARAM_CMD_C = "cmd_C";
 const char* PARAM_CMD_T = "cmd_T";
+const char* PARAM_VAL = "val";
+
+
 
 
 
@@ -1327,6 +1330,27 @@ void setup() {
     if ((request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) || wifiConfigRequired) {
 
       request->send(SPIFFS, "/update.html", String(), false,   processor);
+    }
+    else {
+      request->send(401, "text/plain", "Unauthorized");
+    }
+  });
+
+ server.on("/frq", HTTP_GET, [](AsyncWebServerRequest * request) {
+
+    if ((request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) || wifiConfigRequired) {
+
+       if (request->hasParam(PARAM_VAL)) {
+        sfreq = request->getParam(PARAM_VAL)->value();
+        RotaryEncISR.cntVal = sfreq.toInt();
+        Serial.print("Freq changed: ");
+        Serial.println(sfreq);
+        RotaryEncISR.cntValOld++;   // Change Old value in order to force display update
+        program_state = S_RUN;
+        request->send(200, "text/plain", "OK");
+      }
+
+     // request->send(SPIFFS, "/update.html", String(), false,   processor);
     }
     else {
       request->send(401, "text/plain", "Unauthorized");
