@@ -21,6 +21,16 @@
         var freqIndexOld = 1;
         var newVal_freq;
         var newVal_freq_with_commas;
+        var VALUE_URL = '/frq?apikey=%APIKEY%';
+
+        var fnReq = function (val){
+            var url = VALUE_URL + "&"+$.param( {val} );
+            console.log(url)
+            $.ajax({
+                type: "GET",
+                url: url,
+            });
+        };
 
         $(document).ready(function () {
             var change = function (type) {
@@ -46,6 +56,7 @@
                     }
                 }
                 input.val(newVal, 0);
+                fnReq(val);
             };
             $('body').bind(mousewheelevt, 'mousewheel', function (e) {
                 if (e.originalEvent.wheelDelta / 120 > 0) {
@@ -109,7 +120,7 @@
                             -
                         </button>
                         
-                        <div style="visibility:hidden;padding-left:8px;padding-right:8px;" id="freq_val">2.400.000.000</div> 
+                        <div style="visibility:hidden;padding-left:8px;padding-right:8px;display:flex;align-items:center" id="freq_val">2.400.000.000</div> 
 					    
                         <button class="btn  btn btn-outline-success" type="button" id="incrementPlus"
                                 style="min-width:31px;">
@@ -157,9 +168,15 @@
                 name="frq_index" value="%FRQ_INDEX%">
 
             </form>
-            <div style="margin-left:auto;margin-right:auto;">
+            <div style="margin-left:auto;margin-right:auto;text-align:center">
 					<!-- JU: This button must be outside of form so that only apikey is sent -->
-                    <button class="btn btn-primary m-3" onClick="window.location.href = location.protocol + '//' + location.host + location.pathname +'?apikey=%APIKEY%';">Reload</button>
+		<button type="button" class="btn btn-success" onClick="window.location.href = location.protocol + '//' + location.host + location.pathname +'?apikey=%APIKEY%';">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-clockwise" viewBox="0 0 16 16">
+  		<path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+ 		 <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+		</svg>
+ 		Reload
+              </button>
 
             </div>
         </div>
