@@ -130,7 +130,8 @@ enum state_t {
   S_SET_BUZZER_FREQ,
   S_SET_TEXT_GENERIC,
   S_WIFI_RECONNECT,
-  S_RUN_BEACON
+  S_RUN_BEACON,
+  S_RUN_BEACON_HELL
 } program_state;
 
 enum set_text_state_t {
@@ -181,7 +182,8 @@ const char * TopMenuArray[] = {
   "9. Set WiFi SSID  ",
   "10. Set WiFi PWD  ",
   "11. WiFi Reconn.  ",
-  "12. Beacon (vvv)  "
+  "12. Beacon (vvv)  ",
+  "13. Beacon FHELL  "
 };
 //
 // Rotary Encoder structure
@@ -731,6 +733,13 @@ void loop()
             display.print("BEACON...");
             display.display();
             break;
+           case 12:
+            program_state = S_RUN_BEACON_HELL;
+            display_valuefield_begin();
+            display.print("FHELL BEACON");
+            display.display();
+            break;
+            
           // -----------------------------
           default:
             program_state = S_RUN;
@@ -969,6 +978,32 @@ void loop()
             break;
           }
         }
+        if (pushBtnPressed != 0) break;
+      }
+      //if (pushBtnPressed) {
+      WAIT_Push_Btn_Release(200);
+      RotaryEncPush(&RotaryEnc_FreqWord);
+      display_valuefield_begin();
+      display.display();
+      program_state = S_RUN;
+      //}
+      break;
+    //--------------------------------
+     //--------------------------------
+    case S_RUN_BEACON_HELL:
+      //
+      for (int j = 0; j < 10; j++) {
+        pushBtnPressed = 0;
+        encode_hell("VVVV  TEST");
+        /*for (int i = 0; i < sizeof(beacon_message_buf); i++) {
+          morseEncode(beacon_message_buf[i]);
+          timeout_cnt = 0; // do not allow to timeout this operation
+          if (pushBtnVal == PUSH_BTN_PRESSED) {
+            pushBtnPressed = 1;
+            break;
+          }
+        
+        }*/  
         if (pushBtnPressed != 0) break;
       }
       //if (pushBtnPressed) {
@@ -1555,4 +1590,46 @@ void format_freq(uint32_t n, char *out)
     c = (c + 1) % 3;
   }
   *--out = 0;
+}
+
+
+///////////////////////////////////////////////////////////
+// This is the heart of the beacon.  Given a character, it finds the
+// appropriate glyph and toggles output from the LoRa module to key the
+// Feld Hell signal.
+void encodechar(int ch) {
+    int i, x, y, fch;
+    word fbits;
+     for (i=0; i<NGLYPHS; i++) {
+        // Check each element of the glyphtab to see if we've found the
+        // character we're trying to send.
+        fch = pgm_read_byte(&glyphtab[i].ch);
+        if (fch == ch) {
+            // Found the character, now fetch the pattern to be transmitted,
+            // one column at a time.
+            for (x=0; x<7; x++) {
+                fbits = pgm_read_word(&(glyphtab[i].col[x]));
+                // Transmit (or do not tx) one 'pixel' at a time; characters
+                // are 7 cols by 14 rows.
+                for (y=0; y<14; y++) {
+                    if (fbits & (1<<y)) {
+                      startCW(); //TX tone
+                    } else {
+                      stopCW();  //TX tone off
+                    }
+                         
+                    delayMicroseconds(4060);
+                }
+            }
+            break; // We've found and transmitted the char,
+                   // so exit the for loop
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////// 
+// Loop through the string, transmitting one character at a time.
+void encode_hell(char *str) {
+    while (*str != '\0') 
+        encodechar(*str++) ;
 }
