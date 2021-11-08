@@ -63,6 +63,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // Webserver
 AsyncWebServer server(80);
 AsyncUDP udp;
+QueueHandle_t queue;
 
 String ssid       = "";
 String password   = "";
@@ -98,6 +99,7 @@ const char* PARAM_SDNS = "sdns";
 const char* PARAM_LOCALIP = "localip";
 const char* PARAM_CMD_B = "cmd_B";
 const char* PARAM_CMD_C = "cmd_C";
+const char* PARAM_CMD_D = "cmd_D";
 const char* PARAM_CMD_T = "cmd_T";
 const char* PARAM_VAL = "val";
 
@@ -158,10 +160,11 @@ enum set_text_state_t {
 // 12 25.96 394.457302075279
 // 13 26.66 463.446919736288
 //
-#define PowerArrayMiliWatt_Size 5
+#define PowerArrayMiliWatt_Size 6
 //
 // { Power_mW, Reg-setting }
 const uint32_t PowerArrayMiliWatt [][2] = {
+  {  0,  0 },   // 0mW = no output power, special case
   { 50,  0 },   // cca 50 mW
   { 100, 4 },   // cca 100 mW
   { 200, 8 },   // cca 200 mW
@@ -213,7 +216,8 @@ uint8_t  keyerDotPressed = 0;
 uint8_t  keyerDashPressed = 0;
 uint8_t  keyerCWstarted = 0;
 uint8_t  pushBtnPressed = 0;
-uint8_t stop = 0;
+uint8_t  stop = 0;
+uint32_t  tmp32a, tmp32b;
 
 uint32_t FreqWord = 0;
 uint32_t FreqWordNoOffset = 0;
@@ -225,16 +229,18 @@ uint8_t general_ascii_buf_index = 0;
 char   mycall_ascii_buf[40];
 char   wifi_ssid_ascii_buf[40];
 char   wifi_pwd_ascii_buf[40];
+bool   params_set_by_udp_packet = false;
 
 String s_mycall_ascii_buf;
 //String s_wifi_ssid_ascii_buf;
 //String s_wifi_pwd_ascii_buf;
 String s_general_ascii_buf;
+String udpdataString;
 
-
-char   cq_message_buf[] = " CQ CQ DE ";
+char   cq_message_buf[] =     "CQ CQ DE ";
 char   cq_message_end_buf[] = " +K";
 char   beacon_message_buf[] = "VVV  VVV  VVV  TEST  ";
+char   eee_message_buf[] =    "E E E E E E E E E E E E E E E E E E E E E E E E E";
 
 RotaryEncounters RotaryEnc_FreqWord;
 RotaryEncounters RotaryEnc_MenuSelection;
@@ -330,19 +336,24 @@ void Calc_WPM_dot_delay ( uint32_t wpm) {
 }
 
 // Send CW tone with duration duration_ms
+/*
 void sendCW(uint16_t duration_ms) {
   digitalWrite(LED1, LOW);
   ledcWriteTone(9, RotaryEnc_BuzzerFreq.cntVal);
-  LT.writeCommand(RADIO_SET_FS, 0, 0);
-  LT.txEnable();
-  LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
+  if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
+    LT.writeCommand(RADIO_SET_FS, 0, 0);
+    LT.txEnable();
+    LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
+  }
   delay(duration_ms);
   ledcWriteTone(9, 0);
-  digitalWrite(LED1, HIGH);
-  LT.setMode(MODE_STDBY_RC); // This should terminate TXCONTINUOUSWAVE
-  LT.rxEnable();
+  if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
+    digitalWrite(LED1, HIGH);
+    LT.setMode(MODE_STDBY_RC); // This should terminate TXCONTINUOUSWAVE
+    LT.rxEnable();
+  }
 }
-
+*/
 
 //
 // Refer to state diagram in page 57. - Figure 10-1: Transceiver Circuit Modes
@@ -358,16 +369,20 @@ void startCW() {
   ledcWriteTone(9, RotaryEnc_BuzzerFreq.cntVal);
   //  LT.writeCommand(RADIO_SET_FS, 0, 0);
   //  LT.txEnable();
-  LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
+  if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
+    LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
+  }
 }
 
 // Stop CW - from TX to FS mode
 void stopCW() {
   digitalWrite(LED1, HIGH);
   ledcWriteTone(9, 0);
-  LT.writeCommand(RADIO_SET_FS, 0, 0);
+  if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
+    LT.writeCommand(RADIO_SET_FS, 0, 0);
   //LT.setMode(MODE_STDBY_RC); // This should terminate TXCONTINUOUSWAVE
   //LT.rxEnable();
+  }
 }
 
 // Flash the LED
@@ -390,9 +405,10 @@ void led_Flash(uint16_t flashes, uint16_t delaymS)
 void morseEncode ( unsigned char rxd ) {
   uint8_t i, j, m, mask, morse_len;
 
-  if (rxd >= 97 && rxd < 123) {   // > 'a' && < 'z'
-    rxd = rxd - 32;         // make the character uppercase
-  }
+  // rxd is already uppercase
+  //if (rxd >= 97 && rxd < 123) {   // > 'a' && < 'z'
+  //  rxd = rxd - 32;         // make the character uppercase
+  //}
   //
   if ((rxd < 97) && (rxd > 12)) {   // above 96 no valid Morse characters
     m   = Morse_Coding_table[rxd - 32];
@@ -426,6 +442,36 @@ void morseEncode ( unsigned char rxd ) {
 }
 
 
+void morseEncode2 ( uint8_t rxd ) {
+  uint8_t i, j, m, mask, morse_len;
+
+   rxd -= 128;
+   morse_len = Morse_Coding_table2[rxd]>>8;
+   m = Morse_Coding_table2[rxd] & 0xFF;
+   mask = 1<<(morse_len-1);
+   //
+   for (i = 0; i < morse_len; i++) {
+      startCW();
+      if ((m & mask) > 0x00) { // Dash
+        delay(WPM_dot_delay);
+        delay(WPM_dot_delay);
+        delay(WPM_dot_delay);
+      } else { // Dot
+        delay(WPM_dot_delay);
+      }
+      stopCW();
+      // Dot-wait between played dot/dash
+      delay(WPM_dot_delay);
+      mask = mask >> 1;
+    } //end for(i=0...
+    // Dash-wait between characters
+    delay(WPM_dot_delay);
+    delay(WPM_dot_delay);
+    delay(WPM_dot_delay);
+    //
+}
+
+
 void notFound(AsyncWebServerRequest *request) {
   request->send(404, "text/plain", "Not found");
 }
@@ -445,27 +491,11 @@ String processor(const String& var) {
     return wifiNetworkList;
   }
 
-  if (var == "PWRxx" ) {
-    String rsp;
-    String pwsi;
-    String pwst;
-    int n = 5;
-    for (int i = 0; i < n; ++i) {
-      pwsi = String(PowerArrayMiliWatt[i][1]);
-      pwst = String(PowerArrayMiliWatt[i][0]);
-      rsp += "<option value=\"" + pwsi + "\" ";
-      if ((PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][1] == pwsi.toInt()) && spwr.length() == 0)  rsp += "SELECTED";
-      if (spwr.toInt() == pwsi.toInt())  rsp += "SELECTED";
-      rsp += ">" + pwst + "</option>";
-    }
-    return rsp;
-  }
-
 
   if (var == "PWR" ) {
     String rsp;
     String pwst;
-    int n = 5;
+    int n = PowerArrayMiliWatt_Size;
     for (int i = 0; i < n; ++i) {
       pwst = String(PowerArrayMiliWatt[i][0]);
       rsp += "<option value=\"" + String(i) + "\" ";
@@ -529,7 +559,7 @@ void savePrefs()
 }
 
 // Task SendMorse
-void SendMorse ( void * parameter) {
+void SendMorse_old_no_Queue ( void * parameter) {
   Serial.print("Send morse Task running on core ");
   Serial.println(xPortGetCoreID());
   for (;;) { //infinite loop
@@ -538,8 +568,13 @@ void SendMorse ( void * parameter) {
       int stri = message.length();
       for (int i = 0; i < stri; i++) {
         char c = message.charAt(i);
-        //send(c);
-        morseEncode(c);
+        if (c >= 128) {
+         // if c >=128 we are sending non/defined morse characted which is encoded by Encode2 routine 
+         morseEncode2(c);
+        } else { 
+         // Encoding of regular Morse character
+         morseEncode(c);
+        }
         if (stri < message.length()) {
           stri = message.length();
         }
@@ -547,6 +582,35 @@ void SendMorse ( void * parameter) {
       message = "";
     }
     vTaskDelay(20);
+  }
+}
+
+// Task SendMorse
+void SendMorse ( void * parameter) {
+  Serial.print("Send morse Task running on core ");
+  Serial.println(xPortGetCoreID());
+  char cc;
+  for (;;) { //infinite loop
+    if (xQueueReceive(queue, (void *)&cc, 0) == pdTRUE) {
+        if (cc >= 128) {
+         // if c >=128 we are sending undefined morse characted which is encoded by Encode2 routine 
+         morseEncode2(cc);
+        } else { 
+         // Encoding of regular Morse character
+         morseEncode(cc);
+        }
+    }
+    vTaskDelay(15);
+  }
+}
+
+// Send all characters in message String to Queue
+void messageQueueSend() {
+  message.toUpperCase();
+  int stri = message.length();
+  for (int i = 0; i < stri; i++) {
+    char c = message.charAt(i);
+    xQueueSend(queue, &c, 1000);
   }
 }
 
@@ -575,21 +639,23 @@ void loop()
     if (((keyerVal & 0x01) == 0) || (keyerDotPressed == 1)) {
       startCW();
       delay(WPM_dot_delay);
+      stopCW();
+      delay(WPM_dot_delay>>1);
       ((keyerVal & 0x01) == 0) ? keyerDotPressed  = 1 : keyerDotPressed = 0;
       ((keyerVal & 0x02) == 0) ? keyerDashPressed = 1 : keyerDashPressed = 0;
-      stopCW();
-      delay(WPM_dot_delay);
+      delay(WPM_dot_delay>>1);
     }
     // Keyer pressed DASH
     if (((keyerVal & 0x02) == 0) || (keyerDashPressed == 1)) {
       startCW();
       delay(WPM_dot_delay);
       delay(WPM_dot_delay);
-      ((keyerVal & 0x01) == 0) ? keyerDotPressed  = 1 : keyerDotPressed = 0;
-      ((keyerVal & 0x02) == 0) ? keyerDashPressed = 1 : keyerDashPressed = 0;
       delay(WPM_dot_delay);
       stopCW();
-      delay(WPM_dot_delay);
+      delay(WPM_dot_delay>>1);
+      ((keyerVal & 0x01) == 0) ? keyerDotPressed  = 1 : keyerDotPressed = 0;
+      ((keyerVal & 0x02) == 0) ? keyerDashPressed = 1 : keyerDashPressed = 0;
+      delay(WPM_dot_delay>>1);
     }
   }
   // Process timeout for display items other than main screen
@@ -622,9 +688,8 @@ void loop()
       if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
         limitRotaryEncISR_values();
         display_mainfield_begin(23);
-        format_freq(RegWordToFreq(RotaryEncISR.cntVal), freq_ascii_buf);
-        //format_freq(RegWordToFreq(RotaryEncISR.cntVal) - 2400000000, freq_ascii_buf);
-        //display.println(RegWordToFreq(RotaryEncISR.cntVal),DEC);
+        format_freq(RegWordToFreq(RotaryEncISR.cntVal), freq_ascii_buf, params_set_by_udp_packet);
+        params_set_by_udp_packet = false;
         display.print(freq_ascii_buf);
         display.display();
         JUsetRfFrequency(RegWordToFreq(RotaryEncISR.cntVal), RotaryEnc_OffsetHz.cntVal);
@@ -733,13 +798,13 @@ void loop()
             display.print("BEACON...");
             display.display();
             break;
+          // -----------------------------
            case 12:
             program_state = S_RUN_BEACON_HELL;
             display_valuefield_begin();
             display.print("FHELL BEACON");
             display.display();
             break;
-            
           // -----------------------------
           default:
             program_state = S_RUN;
@@ -988,31 +1053,22 @@ void loop()
       program_state = S_RUN;
       //}
       break;
-    //--------------------------------
      //--------------------------------
     case S_RUN_BEACON_HELL:
       //
       for (int j = 0; j < 10; j++) {
         pushBtnPressed = 0;
         encode_hell("VVVV  TEST");
-        /*for (int i = 0; i < sizeof(beacon_message_buf); i++) {
-          morseEncode(beacon_message_buf[i]);
-          timeout_cnt = 0; // do not allow to timeout this operation
-          if (pushBtnVal == PUSH_BTN_PRESSED) {
-            pushBtnPressed = 1;
-            break;
-          }
-        
-        }*/  
-        if (pushBtnPressed != 0) break;
+        if (pushBtnVal == PUSH_BTN_PRESSED) {
+          pushBtnPressed = 1;
+          break;
+        }
       }
-      //if (pushBtnPressed) {
       WAIT_Push_Btn_Release(200);
       RotaryEncPush(&RotaryEnc_FreqWord);
       display_valuefield_begin();
       display.display();
       program_state = S_RUN;
-      //}
       break;
     //--------------------------------
     default:
@@ -1063,8 +1119,6 @@ void IRAM_ATTR onTimer() {
 }
 
 
-
-
 void setup() {
 
   if (!SPIFFS.begin()) {
@@ -1097,7 +1151,10 @@ void setup() {
   RotaryEnc_FreqWord.cntMax  = FreqToRegWord(2400500000);
   RotaryEnc_FreqWord.cntIncr = 1;
 
-  RotaryEnc_MenuSelection    = {1000000 - 3, 0, 2000000, 1, 0}; // We will implement modulo to wrap around menu items
+  // With MenuSelection we start counter at high value around 1 milion so that we can count up/down
+  // The weird formula below using ...sizeof(TopMenuArray)... will just make sure that initial menu is at index 1 = "CQ..."
+  RotaryEnc_MenuSelection    = { int(1000000/(sizeof(TopMenuArray) / sizeof(TopMenuArray[0]))) * (sizeof(TopMenuArray) / sizeof(TopMenuArray[0])) + 1, 0, 2000000, 1, 0}; 
+  //
   RotaryEnc_KeyerSpeedWPM    = {20, 10, 40, 1, 0};
   RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo
   RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
@@ -1240,6 +1297,7 @@ void setup() {
   LT.setTxParams(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][1], RADIO_RAMP_10_US);
 
   //
+  queue = xQueueCreate( 512, sizeof( char ) );
   xTaskCreatePinnedToCore(SendMorse, "Task1", 20000, NULL, 1, NULL,  0);
 
 
@@ -1319,26 +1377,37 @@ void setup() {
       }
       // Message
       if (request->hasParam(PARAM_MESSAGE)) {
-        message = "  ";   // Some delay at start of the message to mask irregular playing whn MCU still processes HTTP requests
+        message = " ";
         message += request->getParam(PARAM_MESSAGE)->value();
+        messageQueueSend();
       }
       // Break
       if (request->hasParam(PARAM_CMD_B)) {
         scmd = request->getParam(PARAM_CMD_B)->value();
         if (scmd.charAt(0) == 'B') {
-          message  = "";
-          stopCW();
+          xQueueReset( queue );
+          stopCW();  // Just in case we were sending some carrier
         }
       }
       // CQ
       if (request->hasParam(PARAM_CMD_C)) {
         scmd = request->getParam(PARAM_CMD_C)->value();
         if (scmd.charAt(0) == 'C') {
-          message = "  ";   // Some delay at start of the message to mask irregular playing whn MCU still processes HTTP requests
+          message = " ";
           message += cq_message_buf;
           message += s_mycall_ascii_buf;
           message += message;
           message += cq_message_end_buf;
+          messageQueueSend();
+        }
+      }
+      // DOTS
+      if (request->hasParam(PARAM_CMD_D)) {
+        scmd = request->getParam(PARAM_CMD_D)->value();
+        if (scmd.charAt(0) == 'D') {
+          message = " ";
+          message += eee_message_buf;
+          messageQueueSend();
         }
       }
       // Tune
@@ -1429,6 +1498,7 @@ void setup() {
 
 
   // Send a GET request to <IP>/get?message=<message>
+  /*
   server.on("/sendmorse", HTTP_GET, [] (AsyncWebServerRequest * request) {
     if (request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) {
       if (request->hasParam(PARAM_MESSAGE)) {
@@ -1448,6 +1518,7 @@ void setup() {
 
 
   });
+  */
 
   server.on("/js/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
     request->send(SPIFFS, "/js/bootstrap.bundle.min.js", "text/javascript");
@@ -1485,34 +1556,37 @@ void setup() {
     Serial.print(IP);
     Serial.println(" port: 6789");
     udp.onPacket([](AsyncUDPPacket packet) {
-      Serial.print("Type of UDP datagram: ");
-      Serial.print(packet.isBroadcast() ? "Broadcast" : packet.isMulticast() ? "Multicast" : "Unicast");
-      Serial.print(", Sender: ");
-      Serial.print(packet.remoteIP());
-      Serial.print(":");
-      Serial.print(packet.remotePort());
-      Serial.print(", Receiver: ");
-      Serial.print(packet.localIP());
-      Serial.print(":");
-      Serial.print(packet.localPort());
-      Serial.print(", Message lenght: ");
-      Serial.print(packet.length());
-      Serial.print(", Payload: ");
-      Serial.write(packet.data(), packet.length());
-      Serial.println();
-      String udpdataString = (const char*)packet.data();
+      //Serial.print("Type of UDP datagram: ");
+      //Serial.print(packet.isBroadcast() ? "Broadcast" : packet.isMulticast() ? "Multicast" : "Unicast");
+      //Serial.print(", Sender: ");
+      //Serial.print(packet.remoteIP());
+      //Serial.print(":");
+      //Serial.print(packet.remotePort());
+      //Serial.print(", Receiver: ");
+      //Serial.print(packet.localIP());
+      //Serial.print(":");
+      //Serial.print(packet.localPort());
+      //Serial.print(", Message lenght: ");
+      //Serial.print(packet.length());
+      //Serial.print(", Payload: ");
+      //Serial.write(packet.data(), packet.length());
+      //Serial.println();
+      udpdataString = (const char*)packet.data();
       udpdataString = udpdataString.substring(0, packet.length());
-      char bb[2];
-      int command = (int)packet.data()[1] - 48;
+      char bb[5];
+      int command = (int)packet.data()[1];
       if (packet.data()[0] == 27) {
 
         switch (command ) {
+          //--------------------------
           case 0: //break cw
-            //message = "";
+            xQueueReset( queue );
             break;
-          case 2:  // set speed
+          //--------------------------
+          case 50:  // set speed - CW Daemon command
             bb[0] = packet.data()[2];
             bb[1] = packet.data()[3];
+            bb[2] = 0;
             speed = atoi(bb);
             sspeed = String(speed);
             //update_speed();
@@ -1522,15 +1596,38 @@ void setup() {
             //Serial.print("UDP Speed: ");
             //Serial.print(bb);
             break;
-
+          //--------------------------
+          case 0xCE:  // Config packEt = Set frequency + set WPM + set Power
+            // WPM
+            speed = ((uint32_t) packet.data()[6]);
+            sspeed = String(speed);
+            RotaryEnc_KeyerSpeedWPM.cntVal = speed;
+            Calc_WPM_dot_delay(speed);
+            // Power
+            tmp32a = ((uint32_t) packet.data()[7]);
+            RotaryEnc_OutPowerMiliWatt.cntVal = tmp32a;
+            // Frequency word
+            tmp32a = ((uint32_t) packet.data()[5])<<24;
+            tmp32b = ((uint32_t) packet.data()[4])<<16;
+            tmp32a += tmp32b;
+            tmp32b = ((uint32_t) packet.data()[3])<<8;
+            tmp32a += tmp32b;
+            tmp32b = ((uint32_t) packet.data()[2]);
+            tmp32a += tmp32b;
+            RotaryEncISR.cntVal = tmp32a;
+            RotaryEncISR.cntValOld = tmp32a + 1;
+            params_set_by_udp_packet = true;
+            program_state = S_RUN;
+            break;
+          //--------------------------
           default:
             break;
         }
-
-
       } else {
-        udpdataString.toUpperCase();
-        message += udpdataString;
+        //udpdataString.toUpperCase();
+        //message += udpdataString;
+        message = udpdataString;
+        messageQueueSend();
         //Serial.print("UDP TX: ");
         //Serial.print(udpdataString);
 
@@ -1574,13 +1671,16 @@ uint32_t RegWordToFreq(uint32_t freqword) {
 }
 
 // Will add decimal point as separator between thousands, milions...
-void format_freq(uint32_t n, char *out)
+void format_freq(uint32_t n, char *out, bool params_set_by_udp_pkt)
 {
   int c;
   char buf[20];
   char *p;
-
-  sprintf(buf, "%u", n);
+  if (params_set_by_udp_pkt == true) {
+    sprintf(buf, "*%u", n);
+  } else {
+    sprintf(buf, " %u", n);
+  }
   c = 2 - strlen(buf) % 3;
   for (p = buf; *p != 0; p++) {
     *out++ = *p;
@@ -1591,7 +1691,6 @@ void format_freq(uint32_t n, char *out)
   }
   *--out = 0;
 }
-
 
 ///////////////////////////////////////////////////////////
 // This is the heart of the beacon.  Given a character, it finds the
