@@ -3,7 +3,7 @@ QO-100 SAT CW Transmitter with OLED Display using 2.4 GHz LoRa module with TCXO 
 
 https://www.nicerf.com/products/detail/500mw-2-4ghz-lora-wireless-transceiver-module-lora1280f27-lora1281f27.html
 
-Maybe some digi modes possible in the future (RTTY,  Hellschreiber )
+Only one DIGI mode possible - SLOW Hellschreiber - need bigger dish than 80cm - only beacon implemented yet 
 
 *Maximal power output is 450mW. It is enought to work over satellite with 60cm DISH, but tested also with 35cm and helix feed.*
 
