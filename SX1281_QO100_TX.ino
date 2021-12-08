@@ -58,7 +58,11 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 #define PUSH_BTN_PRESSED 0
+#define ReadPushBtnVal()   pushBtnVal=digitalRead(ROTARY_ENC_PUSH)
 #define WAIT_Push_Btn_Release(milisec)  delay(milisec);while(digitalRead(ROTARY_ENC_PUSH)==0){}
+
+#define TIMER_PERIOD_USEC 2500     // 2.5 msec
+
 
 // Webserver
 AsyncWebServer server(80);
@@ -66,6 +70,7 @@ AsyncUDP udp;
 QueueHandle_t queue;
 
 String ssid       = "";
+String ssid_ap    = "QO100TX";
 String password   = "";
 String apikey     = "";
 String sIP        = "";
@@ -104,11 +109,8 @@ const char* PARAM_CMD_T = "cmd_T";
 const char* PARAM_VAL = "val";
 
 
-
-
-
-
 bool wifiConfigRequired = false;
+bool wifiSoftAP = false;
 bool dhcp = true; // dhcp enable disble
 bool con = false; // connection type wifi false
 
@@ -169,7 +171,8 @@ const uint32_t PowerArrayMiliWatt [][2] = {
   { 100, 4 },   // cca 100 mW
   { 200, 8 },   // cca 200 mW
   { 330, 11 },  // cca 300 mW
-  { 450, 13 }   // cca 450 mW
+  { 460, 13 }   // cca 460 mW
+
 };
 //
 //
@@ -184,7 +187,7 @@ const char * TopMenuArray[] = {
   "8. Set My Call    ",
   "9. Set WiFi SSID  ",
   "10. Set WiFi PWD  ",
-  "11. WiFi Reconn.  ",
+  "11. WiFi Reconnect",
   "12. Beacon (vvv)  ",
   "13. Beacon FHELL  "
 };
@@ -212,8 +215,6 @@ uint32_t menuIndex;
 uint32_t timeout_cnt = 0;
 uint8_t  keyerVal      = 1;
 uint8_t  pushBtnVal    = 1;
-uint8_t  keyerDotPressed = 0;
-uint8_t  keyerDashPressed = 0;
 uint8_t  keyerCWstarted = 0;
 uint8_t  pushBtnPressed = 0;
 uint8_t  stop = 0;
@@ -230,6 +231,7 @@ char   mycall_ascii_buf[40];
 char   wifi_ssid_ascii_buf[40];
 char   wifi_pwd_ascii_buf[40];
 bool   params_set_by_udp_packet = false;
+char   morse_c, morse_c_old;
 
 String s_mycall_ascii_buf;
 //String s_wifi_ssid_ascii_buf;
@@ -313,7 +315,7 @@ void display_status_bar () {
   display.print("mW");
   // Display WiFi SSID and IP address
   display.setCursor(1, SCREEN_HEIGHT - 8 - 8); // 7 is the font height
-  display.print(ssid.c_str());
+  display.print(wifiSoftAP == false ? ssid.c_str() : ssid_ap.c_str());
   display.setCursor(1, SCREEN_HEIGHT - 8); // 7 is the font height
   display.print(IP);
   display.display();
@@ -335,31 +337,11 @@ void Calc_WPM_dot_delay ( uint32_t wpm) {
   WPM_dot_delay = (uint32_t) (double(1200.0) / (double) wpm);
 }
 
-// Send CW tone with duration duration_ms
-/*
-void sendCW(uint16_t duration_ms) {
-  digitalWrite(LED1, LOW);
-  ledcWriteTone(9, RotaryEnc_BuzzerFreq.cntVal);
-  if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
-    LT.writeCommand(RADIO_SET_FS, 0, 0);
-    LT.txEnable();
-    LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
-  }
-  delay(duration_ms);
-  ledcWriteTone(9, 0);
-  if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
-    digitalWrite(LED1, HIGH);
-    LT.setMode(MODE_STDBY_RC); // This should terminate TXCONTINUOUSWAVE
-    LT.rxEnable();
-  }
-}
-*/
-
 //
-// Refer to state diagram in page 57. - Figure 10-1: Transceiver Circuit Modes
+// Refer to SX1280/1281 datasheet, state diagram in page 57. - Figure 10-1: Transceiver Circuit Modes
 //
 // 1. Command SET_TXCONTINUOUSWAVE will get the TRX state machine to TX mode
-// 2. Command SET_FS will get the TRX state machine to FS mode
+// 2. Command SET_FS will get the TRX state machine to FS mode (Freq. Synthesis)
 //
 // We should never go to STDBY mode since we want that PLL always runs
 //
@@ -367,9 +349,8 @@ void sendCW(uint16_t duration_ms) {
 void startCW() {
   digitalWrite(LED1, LOW);
   ledcWriteTone(9, RotaryEnc_BuzzerFreq.cntVal);
-  //  LT.writeCommand(RADIO_SET_FS, 0, 0);
-  //  LT.txEnable();
   if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
+    LT.txEnable();
     LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
   }
 }
@@ -379,24 +360,8 @@ void stopCW() {
   digitalWrite(LED1, HIGH);
   ledcWriteTone(9, 0);
   if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
-    LT.writeCommand(RADIO_SET_FS, 0, 0);
-  //LT.setMode(MODE_STDBY_RC); // This should terminate TXCONTINUOUSWAVE
-  //LT.rxEnable();
-  }
-}
-
-// Flash the LED
-void led_Flash(uint16_t flashes, uint16_t delaymS)
-{
-  uint16_t index;
-  for (index = 1; index <= flashes; index++)
-  {
-    digitalWrite(LED1, LOW);
-    ledcWriteTone(9, RotaryEnc_BuzzerFreq.cntVal);
-    delay(delaymS);
-    ledcWriteTone(9, 0);
-    digitalWrite(LED1, HIGH);
-    delay(delaymS);
+    LT.writeCommand(RADIO_SET_FS, 0, 0);  // This will terminate TXCONTINUOUSWAVE
+    LT.rxEnable();                        // No real need for this but it saves power
   }
 }
 
@@ -441,7 +406,8 @@ void morseEncode ( unsigned char rxd ) {
   } //if (rxd < 97...
 }
 
-
+// Morse encode including non playable characters with length up to 6 dots/dashes
+// Ok, could be combined with former morseEncode...
 void morseEncode2 ( uint8_t rxd ) {
   uint8_t i, j, m, mask, morse_len;
 
@@ -558,6 +524,10 @@ void savePrefs()
 
 }
 
+bool next_char_repeated_flag;
+bool play_flag;
+char morse_c_repeat_head;
+
 // Task SendMorse
 void SendMorse_old_no_Queue ( void * parameter) {
   Serial.print("Send morse Task running on core ");
@@ -567,17 +537,18 @@ void SendMorse_old_no_Queue ( void * parameter) {
       message.toUpperCase();
       int stri = message.length();
       for (int i = 0; i < stri; i++) {
-        char c = message.charAt(i);
-        if (c >= 128) {
-         // if c >=128 we are sending non/defined morse characted which is encoded by Encode2 routine 
-         morseEncode2(c);
+        morse_c = message.charAt(i);
+        if (morse_c >= 128) {
+         // if morse_c >=128 we are sending non/defined morse characted which is encoded by Encode2 routine 
+         morseEncode2(morse_c);
         } else { 
          // Encoding of regular Morse character
-         morseEncode(c);
+         morseEncode(morse_c);
         }
         if (stri < message.length()) {
           stri = message.length();
         }
+        // 
       }
       message = "";
     }
@@ -589,18 +560,54 @@ void SendMorse_old_no_Queue ( void * parameter) {
 void SendMorse ( void * parameter) {
   Serial.print("Send morse Task running on core ");
   Serial.println(xPortGetCoreID());
-  char cc;
   for (;;) { //infinite loop
-    if (xQueueReceive(queue, (void *)&cc, 0) == pdTRUE) {
-        if (cc >= 128) {
-         // if c >=128 we are sending undefined morse characted which is encoded by Encode2 routine 
-         morseEncode2(cc);
-        } else { 
-         // Encoding of regular Morse character
-         morseEncode(cc);
+    if (xQueueReceive(queue, (void *)&morse_c, 0) == pdTRUE) {
+        //Serial.printf("M %d %d %d", morse_c, morse_c_old, next_char_repeated_flag);
+        //Serial.println();
+        // From UDP_KEYER we are receiving:
+        //      1. Normal Morse character
+        //      2. Repeated Morse character with header 0x0a (playable) or 0x15 (non-playable) followed by character itself (having value >= 128)
+        // Play-flag controls whether the character is played
+        play_flag = true;
+        //
+        // If actual one is repeated - check if it is the same as previous one and if not then we assume it was missed and therefore let it play
+        if (next_char_repeated_flag == true) {
+          if (morse_c_repeat_head == 0x0a) {
+            morse_c -= 128;
+          }
+          if (morse_c == morse_c_old) {
+            play_flag = false;
+            //Serial.println();
+          } else {
+            //Serial.println("Repeat activated !");
+            //Serial.println();
+          }
         }
-    }
-    vTaskDelay(15);
+        //
+        if (play_flag == true) {
+          if (morse_c >= 128) {
+           // 
+           // We need to keep compatibility with CWDaemon, therefore it might seem that we make it complicated...
+           //
+           // if c >=128 we are sending undefined morse characted which is encoded by Encode2 routine 
+           morseEncode2(morse_c);
+          } else { 
+           // Encoding of regular Morse character
+           morseEncode(morse_c);
+          }
+        } // end play_flag...
+        //
+        // Check if it is repetition-header
+        if ((morse_c == 0x0a) || (morse_c == 0x15)) {
+          next_char_repeated_flag = true;
+          morse_c_repeat_head = morse_c;
+        } else {
+          next_char_repeated_flag = false;
+          morse_c_old = morse_c;
+        }
+      //
+    } // end xQueueReceive....
+    vTaskDelay(13);
   }
 }
 
@@ -619,8 +626,9 @@ void loop()
   //-----------------------------------------
   // -- Straight keyer
   if (RotaryEnc_KeyerType.cntVal & 0x00000001) {
+    keyerVal = digitalRead(KEYER_DOT);
     // Keyer pressed
-    if ((keyerVal & 0x01) == 0)  {
+    if (keyerVal == 0)  {
       if (keyerCWstarted == 0) {
         startCW();
       }
@@ -628,7 +636,7 @@ void loop()
       delay(10);
     }
     // Keyer released
-    if ((keyerVal & 0x01 == 1) && (keyerCWstarted == 1)) {
+    if ((keyerVal == 1) && (keyerCWstarted == 1)) {
       keyerCWstarted = 0;
       stopCW();
       delay(10);
@@ -636,26 +644,22 @@ void loop()
   } else {
     // -- Iambic keywer
     // Keyer pressed DOT
-    if (((keyerVal & 0x01) == 0) || (keyerDotPressed == 1)) {
+    keyerVal   = digitalRead(KEYER_DASH) << 1 | digitalRead(KEYER_DOT);
+    if ((keyerVal & 0x01) == 0) {
       startCW();
       delay(WPM_dot_delay);
       stopCW();
-      delay(WPM_dot_delay>>1);
-      ((keyerVal & 0x01) == 0) ? keyerDotPressed  = 1 : keyerDotPressed = 0;
-      ((keyerVal & 0x02) == 0) ? keyerDashPressed = 1 : keyerDashPressed = 0;
-      delay(WPM_dot_delay>>1);
+      delay(WPM_dot_delay);
     }
     // Keyer pressed DASH
-    if (((keyerVal & 0x02) == 0) || (keyerDashPressed == 1)) {
+    keyerVal   = digitalRead(KEYER_DASH) << 1 | digitalRead(KEYER_DOT);
+    if ((keyerVal & 0x02) == 0) {
       startCW();
       delay(WPM_dot_delay);
       delay(WPM_dot_delay);
       delay(WPM_dot_delay);
       stopCW();
-      delay(WPM_dot_delay>>1);
-      ((keyerVal & 0x01) == 0) ? keyerDotPressed  = 1 : keyerDotPressed = 0;
-      ((keyerVal & 0x02) == 0) ? keyerDashPressed = 1 : keyerDashPressed = 0;
-      delay(WPM_dot_delay>>1);
+      delay(WPM_dot_delay);
     }
   }
   // Process timeout for display items other than main screen
@@ -697,6 +701,7 @@ void loop()
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
       // This has to be at very end since with RotaryEncPush we are making RotaryEncISR.cntValOld different from RotaryEncISR.cntVal
+      ReadPushBtnVal();
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
         program_state = S_TOP_MENU_ITEMS;
@@ -717,6 +722,7 @@ void loop()
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
       // Decide into which menu item to go based on selection
+      ReadPushBtnVal();
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
         RotaryEncPop(&RotaryEnc_MenuSelection);
@@ -820,6 +826,7 @@ void loop()
         for (int i = 0; (i < sizeof(cq_message_buf)) && !stop; i++) {
           morseEncode(cq_message_buf[i]);
           timeout_cnt = 0; // do not allow to timeout this operation
+          ReadPushBtnVal();
           if (pushBtnVal == PUSH_BTN_PRESSED) {
             stop++;
           }
@@ -828,6 +835,7 @@ void loop()
         for (int i = 0; (i < s_mycall_ascii_buf.length()) && !stop; i++) {
           morseEncode(s_mycall_ascii_buf[i]);
           timeout_cnt = 0; // do not allow to timeout this operation
+          ReadPushBtnVal();
           if (pushBtnVal == PUSH_BTN_PRESSED) {
             stop++;
           }
@@ -838,6 +846,7 @@ void loop()
         for (int i = 0; (i < s_mycall_ascii_buf.length()) && !stop; i++) {
           morseEncode(s_mycall_ascii_buf[i]);
           timeout_cnt = 0; // do not allow to timeout this operation
+          ReadPushBtnVal();
           if (pushBtnVal == PUSH_BTN_PRESSED) {
             stop++;
           }
@@ -847,6 +856,7 @@ void loop()
       for (int i = 0; (i < sizeof(cq_message_end_buf)) && !stop; i++) {
         morseEncode(cq_message_end_buf[i]);
         timeout_cnt = 0; // do not allow to timeout this operation
+        ReadPushBtnVal();
         if (pushBtnVal == PUSH_BTN_PRESSED) {
           stop++;
         }
@@ -868,6 +878,7 @@ void loop()
         Calc_WPM_dot_delay(RotaryEncISR.cntVal);  // this will set the WPM_dot_delay variable
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      ReadPushBtnVal();
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
         speed = RotaryEncISR.cntVal;
@@ -892,6 +903,7 @@ void loop()
         LT.setTxParams(PowerArrayMiliWatt[RotaryEncISR.cntVal][1], RADIO_RAMP_10_US);
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      ReadPushBtnVal();
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
         preferences.putInt("OutPower", RotaryEncISR.cntVal);
@@ -910,6 +922,7 @@ void loop()
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
       //
+      ReadPushBtnVal();
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
         preferences.putInt("KeyerType", RotaryEncISR.cntVal);
@@ -930,6 +943,7 @@ void loop()
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
       //
+      ReadPushBtnVal();
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
         preferences.putInt("OffsetHz", RotaryEncISR.cntVal);
@@ -953,6 +967,7 @@ void loop()
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
       //
+      ReadPushBtnVal();
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
         preferences.putInt("BuzzerFreq", RotaryEncISR.cntVal);
@@ -984,6 +999,7 @@ void loop()
       delay(150);
       //
       // With pushbutton pressed either go to next character of finish if selected character was decimal 127 = ⌂ (looks like house icon with roof)
+      ReadPushBtnVal();
       if (pushBtnVal == PUSH_BTN_PRESSED) {
         timeout_cnt = 0;
         WAIT_Push_Btn_Release(200);
@@ -1017,7 +1033,7 @@ void loop()
         } else {
           general_ascii_buf_index++;
           if (general_ascii_buf_index >= s_general_ascii_buf.length()) {
-            s_general_ascii_buf += RotaryEncISR.cntVal;;
+            s_general_ascii_buf += s_general_ascii_buf[general_ascii_buf_index-1];  // ### Add last character
             RotaryEncISR.cntVal = s_general_ascii_buf[general_ascii_buf_index];
           } else {
             RotaryEncISR.cntVal = s_general_ascii_buf[general_ascii_buf_index];
@@ -1038,6 +1054,7 @@ void loop()
         for (int i = 0; i < sizeof(beacon_message_buf); i++) {
           morseEncode(beacon_message_buf[i]);
           timeout_cnt = 0; // do not allow to timeout this operation
+          ReadPushBtnVal();
           if (pushBtnVal == PUSH_BTN_PRESSED) {
             pushBtnPressed = 1;
             break;
@@ -1059,6 +1076,7 @@ void loop()
       for (int j = 0; j < 10; j++) {
         pushBtnPressed = 0;
         encode_hell("VVVV  TEST");
+        ReadPushBtnVal();
         if (pushBtnVal == PUSH_BTN_PRESSED) {
           pushBtnPressed = 1;
           break;
@@ -1094,8 +1112,6 @@ void IRAM_ATTR onTimer() {
   //
   if (ISR_cnt != 255) ISR_cnt++;
   //
-  keyerVal   = digitalRead(KEYER_DASH) << 1 | digitalRead(KEYER_DOT);
-  pushBtnVal = digitalRead(ROTARY_ENC_PUSH);
   // SW debounce
   rotaryA_Val = (rotaryA_Val << 1 | (uint8_t)digitalRead(ROTARY_ENC_A)) & 0x0F;
   //
@@ -1121,9 +1137,22 @@ void IRAM_ATTR onTimer() {
 
 void setup() {
 
+  // Setup pin as output for indicator LED or keying output (via Open-collector tranzistor)
+  pinMode(LED1, OUTPUT);    
+  // Configure BUZZER functionalities.
+  ledcSetup(3, 8000, 8);   //PWM Channel, Freq, Resolution
+  /// Attach BUZZER pin.
+  ledcAttachPin(BUZZER, 3);  // Pin, Channel
+
+  // Mount SPIFFS (filesystem, the HTML files must be flashed too by other utility)
   if (!SPIFFS.begin()) {
     Serial.println("An Error has occurred while mounting SPIFFS");
-    return;
+    while (1) {
+      delay(20);
+      ledcWriteTone(9, 784);  // tone g
+      delay(20);
+      ledcWriteTone(9, 0);
+    }
   }
 
   pinMode(ROTARY_ENC_A,    INPUT_PULLUP);
@@ -1133,17 +1162,11 @@ void setup() {
   pinMode(KEYER_DASH,      INPUT_PULLUP);
   pinMode(TCXO_EN, OUTPUT);
   digitalWrite(TCXO_EN, 1);
-  pinMode(LED1, OUTPUT);                                   //setup pin as output for indicator LED
-  //
-  // Configure BUZZER functionalities.
-  ledcSetup(9, 8000, 8);   //PWM Channel, Freq, Resolution
-  /// Attach BUZZER pin.
-  ledcAttachPin(BUZZER, 9); // Pin, Channel
 
   // Timer for ISR which is processing rotary encoder events
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &onTimer, true);
-  timerAlarmWrite(timer, 2500, true);  // 2500 = 2.5 msec
+  timerAlarmWrite(timer, TIMER_PERIOD_USEC, true);  // 2500 = 2.5 msec
   timerAlarmEnable(timer);
 
   RotaryEnc_FreqWord.cntVal  = FreqToRegWord(Frequency);
@@ -1161,7 +1184,6 @@ void setup() {
   RotaryEnc_BuzzerFreq       = {600, 0, 2000, 100, 0};
   RotaryEnc_OutPowerMiliWatt = {PowerArrayMiliWatt_Size - 1, 0, PowerArrayMiliWatt_Size - 1, 1, 0};
   RotaryEnc_TextInput_Char_Index  = {65, 33, 127, 1, 66};
-
 
 
   // Get configuration values stored in EEPROM/FLASH
@@ -1222,7 +1244,6 @@ void setup() {
   display.display();
   delay(500);
 
-  //led_Flash(2, 125);                                       //two quick LED flashes to indicate program start
 
   Serial.begin(115200);
   Serial.println();
@@ -1244,15 +1265,19 @@ void setup() {
 
   //setup hardware pins used by device, then check if device is found
   if (LT.begin(NSS, NRESET, RFBUSY, DIO1, DIO2, DIO3, RX_EN, TX_EN, LORA_DEVICE))  {
-    Serial.println(F("LoRa Device found"));
-    led_Flash(1, 50);
+    Serial.println(F("SX128x LoRa device found"));
+    ledcWriteTone(9, 523);  // tone c
     delay(30);
-    led_Flash(1, 50 * 3);
-    led_Flash(1, 50);
+    ledcWriteTone(9, 659);  // tone d
+    delay(60);
+    ledcWriteTone(9, 0);
   } else {
-    Serial.println(F("No device responding"));
+    Serial.println(F("SX128x device not responding !"));
     while (1) {
-      led_Flash(50, 50);  //long fast speed LED flash indicates device error
+      delay(20);
+      ledcWriteTone(9, 784);  // tone g
+      delay(20);
+      ledcWriteTone(9, 0);
     }
   }
 
@@ -1278,7 +1303,7 @@ void setup() {
   LT.setDioIrqParams(IRQ_RADIO_NONE, 0, 0, 0);
   //***************************************************************************************************
 
-  LT.txEnable();  //This will stay alway ON as we transmit only
+  //LT.txEnable();  //This will stay alway ON as we transmit only
 
 
   Serial.println();
@@ -1291,7 +1316,7 @@ void setup() {
   Serial.println();
   Serial.println();
 
-  Serial.print(F("Transmitter ready"));
+  Serial.print(F("CW Transmitter ready"));
   Serial.println();
 
   LT.setTxParams(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][1], RADIO_RAMP_10_US);
@@ -1336,10 +1361,11 @@ void setup() {
     wifiConfigRequired = true;
     Serial.println("Start AP");
     Serial.printf("WiFi is not connected or configured. Starting AP mode\n");
-    ssid = "QO100TX";
-    WiFi.softAP(ssid.c_str());
+    //ssid_ap = "QO100TX";   // ### Already defined
+    WiFi.softAP(ssid_ap.c_str());
     IP = WiFi.softAPIP();
-    Serial.printf("SSID: %s, IP: ", ssid.c_str());
+    wifiSoftAP = true;
+    Serial.printf("SSID: %s, IP: ", ssid_ap.c_str());
     Serial.println(IP);
   }
 
