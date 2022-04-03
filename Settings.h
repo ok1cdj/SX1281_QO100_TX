@@ -1,3 +1,6 @@
+//
+// Keeping original note from example coming with SX12XX library
+//
 /*******************************************************************************************************
   Programs for Arduino - Copyright of the author Stuart Robinson - 02/03/20
 
@@ -42,7 +45,7 @@
 // https://www.esp32.com/viewtopic.php?t=13697 :
 // you can only use GPIO34 and higher as inputs, not outputs 
 
-#define Program_Version "QO-100 TX SX1281 V0.2"
+#define Program_Version "v1.0"
 
 
 #define NSS 5                                  //select pin on LoRa device
@@ -63,6 +66,10 @@
 #define VCCPOWER 17    //JU-not needed by module          //pin controls power to external devices
 #define LORA_DEVICE DEVICE_SX1281               //we need to define the device we are using
 #define TCXO_EN 14
+#define PTT_OUT 12
+
+#define LOOP_PTT_MULT_VALUE 1000  // Value by which PttTimeout counter is multiplied - we need this since mail loop is running very fast
+                                  // But be careful not to exceed max value of int32 variable of PttTimeout counter
 
 // Pin definitions
 
@@ -169,131 +176,131 @@ const uint8_t  Morse_Coding_table [] = {
 const uint16_t  Morse_Coding_table2 [] = {
 7*256 + 0b00000000,	// ......  	0 no valid morse code, len = 7
 6*256 + 0b00000000,	// ......  	1 no valid morse code, len = 6
-5*265 + '5',		// .....    	2 '5'
+5*265 + '5',		    // .....    	2 '5'
 6*256 + 0b00000001,	// .....-  	3 no valid morse code, len = 6
-4*265 + 'H',		// ....     	4 'H'
+4*265 + 'H',		    // ....     	4 'H'
 6*256 + 0b00000010,	// ....-.  	5 no valid morse code, len = 6
-5*265 + '4',		// ....-    	6 '4'
+5*265 + '4',		    // ....-    	6 '4'
 6*256 + 0b00000011,	// ....--  	7 no valid morse code, len = 6
-3*265 + 'S',		// ...      	8 'S'
+3*265 + 'S',		    // ...      	8 'S'
 6*256 + 0b00000100,	// ...-..  	9 no valid morse code, len = 6
 5*256 + 0b00000010,	// ...-.   	10 no valid morse code, len = 5
 6*256 + 0b00000101,	// ...-.-  	11 no valid morse code, len = 6
-4*265 + 'V',		// ...-     	12 'V'
+4*265 + 'V',		    // ...-     	12 'V'
 6*256 + 0b00000110,	// ...--.  	13 no valid morse code, len = 6
-5*265 + '3',		// ...--    	14 '3'
+5*265 + '3',		    // ...--    	14 '3'
 6*256 + 0b00000111,	// ...---  	15 no valid morse code, len = 6
-2*265 + 'I',		// ..       	16 'I'
+2*265 + 'I',		    // ..       	16 'I'
 6*256 + 0b00001000,	// ..-...  	17 no valid morse code, len = 6
 5*256 + 0b00000100,	// ..-..   	18 no valid morse code, len = 5
 6*256 + 0b00001001,	// ..-..-  	19 no valid morse code, len = 6
-4*265 + 'F',		// ..-.     	20 'F'
+4*265 + 'F',		    // ..-.     	20 'F'
 6*256 + 0b00001010,	// ..-.-.  	21 no valid morse code, len = 6
 5*256 + 0b00000101,	// ..-.-   	22 no valid morse code, len = 5
 6*256 + 0b00001011,	// ..-.--  	23 no valid morse code, len = 6
-3*265 + 'U',		// ..-      	24 'U'
-6*265 + '?',		// ..--..   	25 '?'
+3*265 + 'U',		    // ..-      	24 'U'
+6*265 + '?',		    // ..--..   	25 '?'
 5*256 + 0b00000110,	// ..--.   	26 no valid morse code, len = 5
-6*265 + '_',		// ..--.-   	27 '_'
+6*265 + '_',		    // ..--.-   	27 '_'
 4*256 + 0b00000011,	// ..--    	28 no valid morse code, len = 4
 6*256 + 0b00001110,	// ..---.  	29 no valid morse code, len = 6
-5*265 + '2',		// ..---    	30 '2'
+5*265 + '2',		    // ..---    	30 '2'
 6*256 + 0b00001111,	// ..----  	31 no valid morse code, len = 6
-1*265 + 'E',		// .        	32 'E'
+1*265 + 'E',		    // .        	32 'E'
 6*256 + 0b00010000,	// .-....  	33 no valid morse code, len = 6
-5*265 + '&',		// .-...    	34 '&'
+5*265 + '&',		    // .-...    	34 '&'
 6*256 + 0b00010001,	// .-...-  	35 no valid morse code, len = 6
-4*265 + 'L',		// .-..     	36 'L'
-6*265 + '"',		// .-..-.   	37 '"'
+4*265 + 'L',		    // .-..     	36 'L'
+6*265 + '"',		    // .-..-.   	37 '"'
 5*256 + 0b00001001,	// .-..-   	38 no valid morse code, len = 5
 6*256 + 0b00010011,	// .-..--  	39 no valid morse code, len = 6
-3*265 + 'R',		// .-.      	40 'R'
+3*265 + 'R',		    // .-.      	40 'R'
 6*256 + 0b00010100,	// .-.-..  	41 no valid morse code, len = 6
-5*265 + '+',		// .-.-.    	42 '+'
-6*265 + '.',		// .-.-.-   	43 '.'
+5*265 + '+',		    // .-.-.    	42 '+'
+6*265 + '.',		    // .-.-.-   	43 '.'
 4*256 + 0b00000101,	// .-.-    	44 no valid morse code, len = 4
 6*256 + 0b00010110,	// .-.--.  	45 no valid morse code, len = 6
 5*256 + 0b00001011,	// .-.--   	46 no valid morse code, len = 5
 6*256 + 0b00010111,	// .-.---  	47 no valid morse code, len = 6
-2*265 + 'A',		// .-       	48 'A'
+2*265 + 'A',		    // .-       	48 'A'
 6*256 + 0b00011000,	// .--...  	49 no valid morse code, len = 6
 5*256 + 0b00001100,	// .--..   	50 no valid morse code, len = 5
 6*256 + 0b00011001,	// .--..-  	51 no valid morse code, len = 6
-4*265 + 'P',		// .--.     	52 'P'
-6*265 + '@',		// .--.-.   	53 '@'
+4*265 + 'P',		    // .--.     	52 'P'
+6*265 + '@',		    // .--.-.   	53 '@'
 5*256 + 0b00001101,	// .--.-   	54 no valid morse code, len = 5
 6*256 + 0b00011011,	// .--.--  	55 no valid morse code, len = 6
-3*265 + 'W',		// .--      	56 'W'
+3*265 + 'W',		    // .--      	56 'W'
 6*256 + 0b00011100,	// .---..  	57 no valid morse code, len = 6
 5*256 + 0b00001110,	// .---.   	58 no valid morse code, len = 5
 6*256 + 0b00011101,	// .---.-  	59 no valid morse code, len = 6
-4*265 + 'J',		// .---     	60 'J'
-6*265 + '\'',		// .----.   	61 '''
-5*265 + '1',		// .----    	62 '1'
+4*265 + 'J',		    // .---     	60 'J'
+6*265 + '\'',		    // .----.   	61 '''
+5*265 + '1',		    // .----    	62 '1'
 6*256 + 0b00011111,	// .-----  	63 no valid morse code, len = 6
 0*256 + 0b00000000,	//         	64 no valid morse code, len = 0
 6*256 + 0b00100000,	// -.....  	65 no valid morse code, len = 6
-5*265 + '6',		// -....    	66 '6'
-6*265 + '-',		// -....-   	67 '-'
-4*265 + 'B',		// -...     	68 'B'
+5*265 + '6',		    // -....    	66 '6'
+6*265 + '-',		    // -....-   	67 '-'
+4*265 + 'B',		    // -...     	68 'B'
 6*256 + 0b00100010,	// -...-.  	69 no valid morse code, len = 6
-5*265 + '=',		// -...-    	70 '='
+5*265 + '=',		    // -...-    	70 '='
 6*256 + 0b00100011,	// -...--  	71 no valid morse code, len = 6
-3*265 + 'D',		// -..      	72 'D'
+3*265 + 'D',		    // -..      	72 'D'
 6*256 + 0b00100100,	// -..-..  	73 no valid morse code, len = 6
-5*265 + '/',		// -..-.    	74 '/'
+5*265 + '/',		    // -..-.    	74 '/'
 6*256 + 0b00100101,	// -..-.-  	75 no valid morse code, len = 6
-4*265 + 'X',		// -..-     	76 'X'
+4*265 + 'X',		    // -..-     	76 'X'
 6*256 + 0b00100110,	// -..--.  	77 no valid morse code, len = 6
 5*256 + 0b00010011,	// -..--   	78 no valid morse code, len = 5
 6*256 + 0b00100111,	// -..---  	79 no valid morse code, len = 6
-2*265 + 'N',		// -.       	80 'N'
+2*265 + 'N',		    // -.       	80 'N'
 6*256 + 0b00101000,	// -.-...  	81 no valid morse code, len = 6
 5*256 + 0b00010100,	// -.-..   	82 no valid morse code, len = 5
 6*256 + 0b00101001,	// -.-..-  	83 no valid morse code, len = 6
-4*265 + 'C',		// -.-.     	84 'C'
-6*265 + ';',		// -.-.-.   	85 ';'
+4*265 + 'C',		    // -.-.     	84 'C'
+6*265 + ';',		    // -.-.-.   	85 ';'
 5*256 + 0b00010101,	// -.-.-   	86 no valid morse code, len = 5
-6*265 + '!',		// -.-.--   	87 '!'
-3*265 + 'K',		// -.-      	88 'K'
+6*265 + '!',		    // -.-.--   	87 '!'
+3*265 + 'K',		    // -.-      	88 'K'
 6*256 + 0b00101100,	// -.--..  	89 no valid morse code, len = 6
-5*265 + '(',		// -.--.    	90 '('
-6*265 + ')',		// -.--.-   	91 ')'
-4*265 + 'Y',		// -.--     	92 'Y'
+5*265 + '(',		    // -.--.    	90 '('
+6*265 + ')',		    // -.--.-   	91 ')'
+4*265 + 'Y',		    // -.--     	92 'Y'
 6*256 + 0b00101110,	// -.---.  	93 no valid morse code, len = 6
 5*256 + 0b00010111,	// -.---   	94 no valid morse code, len = 5
 6*256 + 0b00101111,	// -.----  	95 no valid morse code, len = 6
-1*265 + 'T',		// -        	96 'T'
+1*265 + 'T',		    // -        	96 'T'
 6*256 + 0b00110000,	// --....  	97 no valid morse code, len = 6
-5*265 + '7',		// --...    	98 '7'
+5*265 + '7',		    // --...    	98 '7'
 6*256 + 0b00110001,	// --...-  	99 no valid morse code, len = 6
-4*265 + 'Z',		// --..     	100 'Z'
+4*265 + 'Z',		    // --..     	100 'Z'
 6*256 + 0b00110010,	// --..-.  	101 no valid morse code, len = 6
 5*256 + 0b00011001,	// --..-   	102 no valid morse code, len = 5
-6*265 + ',',		// --..--   	103 ','
-3*265 + 'G',		// --.      	104 'G'
+6*265 + ',',		    // --..--   	103 ','
+3*265 + 'G',		    // --.      	104 'G'
 6*256 + 0b00110100,	// --.-..  	105 no valid morse code, len = 6
 5*256 + 0b00011010,	// --.-.   	106 no valid morse code, len = 5
 6*256 + 0b00110101,	// --.-.-  	107 no valid morse code, len = 6
-4*265 + 'Q',		// --.-     	108 'Q'
+4*265 + 'Q',		    // --.-     	108 'Q'
 6*256 + 0b00110110,	// --.--.  	109 no valid morse code, len = 6
 5*256 + 0b00011011,	// --.--   	110 no valid morse code, len = 5
 6*256 + 0b00110111,	// --.---  	111 no valid morse code, len = 6
-2*265 + 'M',		// --       	112 'M'
-6*265 + ':',		// ---...   	113 ':'
-5*265 + '8',		// ---..    	114 '8'
+2*265 + 'M',		    // --       	112 'M'
+6*265 + ':',		    // ---...   	113 ':'
+5*265 + '8',		    // ---..    	114 '8'
 6*256 + 0b00111001,	// ---..-  	115 no valid morse code, len = 6
 4*256 + 0b00001110,	// ---.    	116 no valid morse code, len = 4
 6*256 + 0b00111010,	// ---.-.  	117 no valid morse code, len = 6
 5*256 + 0b00011101,	// ---.-   	118 no valid morse code, len = 5
 6*256 + 0b00111011,	// ---.--  	119 no valid morse code, len = 6
-3*265 + 'O',		// ---      	120 'O'
+3*265 + 'O',		    // ---      	120 'O'
 6*256 + 0b00111100,	// ----..  	121 no valid morse code, len = 6
-5*265 + '9',		// ----.    	122 '9'
+5*265 + '9',		    // ----.    	122 '9'
 6*256 + 0b00111101,	// ----.-  	123 no valid morse code, len = 6
 4*256 + 0b00001111,	// ----    	124 no valid morse code, len = 4
 6*256 + 0b00111110,	// -----.  	125 no valid morse code, len = 6
-5*265 + '0',		// -----    	126 '0'
+5*265 + '0',		    // -----    	126 '0'
 6*256 + 0b00111111	// ------  	127 no valid morse code, len = 6
 };
 
