@@ -3,17 +3,6 @@
 // by Jan Uhrin, OM2JU and Ondrej Kolonicny, OK1CDJ
 //
 //
-// States of program with explanation:
-//
-//  RUN     - main state, displays freq. and status, responds to keyer or received UDP packets
-//  SET_PWM
-//  SET_KEYER
-//  SET_OFFSET
-//  SET_SSID
-//  SET_PWD
-//  WIFI_RECONNECT
-// ...
-//
 //
 // Power level settings - from documentation of LoRa128xF27 module
 // LEV dBm  mA    Reg value
@@ -28,7 +17,7 @@
 // 1  6.0   130   -12
 // 0  3.0   125   -15
 //
-// SX128x datasheet p. 73:   Reg vale 0 = -18dBm, Reg value 31 = 13dBm  ==> PA of the module has gain 32.2 dB
+// SX128x datasheet p. 73:   Reg vale 0 = -18dBm, Reg value 31 = 13dBm  ==> PA of the module has gain of about 32.2 dB
 //
 //
 
@@ -61,7 +50,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define ReadPushBtnVal()   pushBtnVal=digitalRead(ROTARY_ENC_PUSH)
 #define WAIT_Push_Btn_Release(milisec)  delay(milisec);while(digitalRead(ROTARY_ENC_PUSH)==0){}
 
-#define TIMER_PERIOD_USEC 2500     // 2.5 msec
+#define TIMER_PERIOD_USEC 2000     // 2500 = 2.5 msec
 
 
 // Webserver
@@ -132,12 +121,14 @@ enum state_t {
   S_SET_KEYER_TYPE,
   S_SET_FREQ_OFFSET,
   S_SET_BUZZER_FREQ,
+  S_SET_PTT_TIMEOUT,
   S_SET_TEXT_GENERIC,
   S_WIFI_RECONNECT,
   S_RUN_BEACON,
   S_RUN_BEACON_HELL
 } program_state;
 
+// States when text value is modified
 enum set_text_state_t {
   S_SET_MY_CALL = 0,
   S_SET_WIFI_SSID,
@@ -145,7 +136,7 @@ enum set_text_state_t {
 } set_text_state;
 
 
-//
+// Perl script to dump out power reg. setting, dBm value, and mWatt value
 // for($i=-1;$i<13;$i++) { print $i+1 . " "; print 18.26+0.7*$i . " " . 10**((18.26+0.7*$i)/10). "\n"; }
 // 0 17.56 57.0164272280748
 // 1 18.26 66.9884609416526
@@ -175,31 +166,32 @@ const uint32_t PowerArrayMiliWatt [][2] = {
 
 };
 //
-//
+// Menu definition
 const char * TopMenuArray[] = {
-  "1. << Back        ",
+  "1. < Back / ",           // shorter as we display version afterwards    
   "2. CQ...          ",
   "3. Set WPM        ",
   "4. Set Out Power  ",
   "5. Set Keyer Typ  ",
   "6. Set Offset Hz  ",
   "7. Set Buzzer Freq",
-  "8. Set My Call    ",
-  "9. Set WiFi SSID  ",
-  "10. Set WiFi PWD  ",
-  "11. WiFi Reconnect",
-  "12. Beacon (vvv)  ",
-  "13. Beacon FHELL  "
+  "8. Set PTT timeout",
+  "9. Set My Call    ",
+  "10. Set WiFi SSID ",
+  "11. Set WiFi PWD  ",
+  "12. WiFi Reconnect",
+  "13. Beacon (vvv)  ",
+  "14. Beacon FHELL  "
 };
 //
 // Rotary Encoder structure
 struct RotaryEncounters
 {
-  int32_t cntVal;
-  int32_t cntMin;
-  int32_t cntMax;
-  int32_t cntIncr;
-  int32_t cntValOld;
+  int32_t cntVal;      // actual value
+  int32_t cntMin;      // minimum
+  int32_t cntMax;      // maximum
+  int32_t cntIncr;     // increment
+  int32_t cntValOld;   // for detection if value has changed
 };
 
 hw_timer_t * timer = NULL;
@@ -223,6 +215,9 @@ uint32_t  tmp32a, tmp32b;
 uint32_t FreqWord = 0;
 uint32_t FreqWordNoOffset = 0;
 uint32_t WPM_dot_delay;
+int32_t PttTimeoutCnt;
+int32_t PttTimeoutCntStartValue;
+
 
 char   freq_ascii_buf[20];   // Buffer for formatting of FREQ value
 char   general_ascii_buf[40];
@@ -250,6 +245,7 @@ RotaryEncounters RotaryEnc_KeyerSpeedWPM;
 RotaryEncounters RotaryEnc_KeyerType;
 RotaryEncounters RotaryEnc_OffsetHz;
 RotaryEncounters RotaryEnc_BuzzerFreq;
+RotaryEncounters RotaryEnc_PttTimeout;
 RotaryEncounters RotaryEnc_OutPowerMiliWatt;
 RotaryEncounters RotaryEnc_TextInput_Char_Index;
 RotaryEncounters RotaryEncISR;
@@ -348,17 +344,18 @@ void Calc_WPM_dot_delay ( uint32_t wpm) {
 // Start CW - from FS to TX mode
 void startCW() {
   digitalWrite(LED1, LOW);
-  ledcWriteTone(9, RotaryEnc_BuzzerFreq.cntVal);
+  ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
   if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
     LT.txEnable();
     LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
   }
+  PttTimeoutCnt = PttTimeoutCntStartValue;
 }
 
 // Stop CW - from TX to FS mode
 void stopCW() {
   digitalWrite(LED1, HIGH);
-  ledcWriteTone(9, 0);
+  ledcWriteTone(3, 0);
   if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
     LT.writeCommand(RADIO_SET_FS, 0, 0);  // This will terminate TXCONTINUOUSWAVE
     LT.rxEnable();                        // No real need for this but it saves power
@@ -407,7 +404,7 @@ void morseEncode ( unsigned char rxd ) {
 }
 
 // Morse encode including non playable characters with length up to 6 dots/dashes
-// Ok, could be combined with former morseEncode...
+// Ok, this could be combined with former morseEncode, but keeping it separate for sake of clarity...
 void morseEncode2 ( uint8_t rxd ) {
   uint8_t i, j, m, mask, morse_len;
 
@@ -676,6 +673,29 @@ void loop()
     }
   }
   //
+  // PTT
+  if (PttTimeoutCnt != 0) {
+    digitalWrite(PTT_OUT, 1);
+    // Debug info on display - but has performance penalty...
+    //if (PttTimeoutCnt == PttTimeoutCntStartValue) {
+    //  PttTimeoutFirstLoop = 0;
+    //  display.setTextColor(BLACK);
+    //  display.setTextSize(1);
+    //  display.setCursor(SCREEN_WIDTH-12, SCREEN_HEIGHT - 8); // 7 is the font height
+    //  display.print('|');
+    //  display.display();
+    //}
+    PttTimeoutCnt--;
+  } else {
+    digitalWrite(PTT_OUT, 0);
+    // Debug info on display - but has performance penalty...
+    //display.setTextColor(WHITE);
+    //display.setTextSize(1);
+    //display.setCursor(SCREEN_WIDTH-12, SCREEN_HEIGHT - 8); // 7 is the font height
+    //display.print('|');
+    //display.display();
+  }
+  //
   // Main FSM
   //-----------------------------------------
   switch (program_state) {
@@ -718,6 +738,9 @@ void loop()
         timeout_cnt = 0;
         display_mainfield_begin(10);
         display.print(TopMenuArray[menuIndex]);
+        if (menuIndex==0) {
+          display.print(Program_Version);
+        }
         display.display();
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
@@ -766,6 +789,11 @@ void loop()
             break;
           // -----------------------------
           case 7:
+            program_state = S_SET_PTT_TIMEOUT;
+            RotaryEncPush(&RotaryEnc_PttTimeout); // makes RotaryEncISR.cntValOld different from RotaryEncISR.cntVal  ==> forces display update
+            break;
+          // -----------------------------          
+          case 8:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_MY_CALL;
             s_general_ascii_buf = s_mycall_ascii_buf.substring(0);
@@ -774,7 +802,7 @@ void loop()
             general_ascii_buf_index = 0;
             break;
           // -----------------------------
-          case 8:
+          case 9:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_WIFI_SSID;
             //s_general_ascii_buf = s_wifi_ssid_ascii_buf.substring(0);
@@ -784,7 +812,7 @@ void loop()
             general_ascii_buf_index = 0;
             break;
           // -----------------------------
-          case 9:
+          case 10:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_WIFI_PWD;
             //s_general_ascii_buf = s_wifi_pwd_ascii_buf.substring(0);
@@ -794,18 +822,18 @@ void loop()
             general_ascii_buf_index = 0;
             break;
           // -----------------------------
-          case 10:
+          case 11:
             program_state = S_WIFI_RECONNECT;
             break;
           // -----------------------------
-          case 11:
+          case 12:
             program_state = S_RUN_BEACON;
             display_valuefield_begin();
             display.print("BEACON...");
             display.display();
             break;
           // -----------------------------
-           case 12:
+           case 13:
             program_state = S_RUN_BEACON_HELL;
             display_valuefield_begin();
             display.print("FHELL BEACON");
@@ -952,7 +980,6 @@ void loop()
         program_state = S_RUN;
       }
       break;
-
     //--------------------------------
     case S_SET_BUZZER_FREQ:
       if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
@@ -961,9 +988,9 @@ void loop()
         display.print(RotaryEncISR.cntVal);
         display.display();
         // Short beep with new tone value
-        ledcWriteTone(9, RotaryEncISR.cntVal);
+        ledcWriteTone(3, RotaryEncISR.cntVal);
         delay(100);
-        ledcWriteTone(9, 0);
+        ledcWriteTone(3, 0);
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
       //
@@ -972,6 +999,26 @@ void loop()
         WAIT_Push_Btn_Release(200);
         preferences.putInt("BuzzerFreq", RotaryEncISR.cntVal);
         RotaryEncPop(&RotaryEnc_BuzzerFreq);
+        RotaryEncPush(&RotaryEnc_FreqWord);
+        program_state = S_RUN;
+      }
+      break;
+    //--------------------------------
+    case S_SET_PTT_TIMEOUT:
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        timeout_cnt = 0;
+        display_valuefield_begin();
+        display.print(RotaryEncISR.cntVal);
+        display.display();
+      }
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      //
+      ReadPushBtnVal();
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        WAIT_Push_Btn_Release(200);
+        preferences.putInt("PttTimeout", RotaryEncISR.cntVal);
+        RotaryEncPop(&RotaryEnc_PttTimeout);
+        PttTimeoutCntStartValue = RotaryEnc_PttTimeout.cntVal * LOOP_PTT_MULT_VALUE;
         RotaryEncPush(&RotaryEnc_FreqWord);
         program_state = S_RUN;
       }
@@ -1049,7 +1096,7 @@ void loop()
     //--------------------------------
     case S_RUN_BEACON:
       //
-      for (int j = 0; j < 10; j++) {
+      for (int j = 0; j < 20; j++) {
         pushBtnPressed = 0;
         for (int i = 0; i < sizeof(beacon_message_buf); i++) {
           morseEncode(beacon_message_buf[i]);
@@ -1149,9 +1196,9 @@ void setup() {
     Serial.println("An Error has occurred while mounting SPIFFS");
     while (1) {
       delay(20);
-      ledcWriteTone(9, 784);  // tone g
+      ledcWriteTone(3, 784);  // tone g
       delay(20);
-      ledcWriteTone(9, 0);
+      ledcWriteTone(3, 0);
     }
   }
 
@@ -1161,7 +1208,9 @@ void setup() {
   pinMode(KEYER_DOT,       INPUT_PULLUP);
   pinMode(KEYER_DASH,      INPUT_PULLUP);
   pinMode(TCXO_EN, OUTPUT);
-  digitalWrite(TCXO_EN, 1);
+  pinMode(PTT_OUT, OUTPUT);
+  digitalWrite(TCXO_EN, 1);   // We keep it always on
+  digitalWrite(PTT_OUT, 0);
 
   // Timer for ISR which is processing rotary encoder events
   timer = timerBegin(0, 80, true);
@@ -1182,6 +1231,7 @@ void setup() {
   RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo
   RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
   RotaryEnc_BuzzerFreq       = {600, 0, 2000, 100, 0};
+  RotaryEnc_PttTimeout       = {300, 10, 2000, 10, 0};
   RotaryEnc_OutPowerMiliWatt = {PowerArrayMiliWatt_Size - 1, 0, PowerArrayMiliWatt_Size - 1, 1, 0};
   RotaryEnc_TextInput_Char_Index  = {65, 33, 127, 1, 66};
 
@@ -1197,7 +1247,10 @@ void setup() {
   RotaryEnc_KeyerType.cntVal        = preferences.getInt("KeyerType", 0);
   RotaryEnc_OffsetHz.cntVal         = preferences.getInt("OffsetHz", 0);
   RotaryEnc_BuzzerFreq.cntVal       = preferences.getInt("BuzzerFreq", 600);
+  RotaryEnc_PttTimeout.cntVal       = preferences.getInt("PttTimeout", 300);
   RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower", PowerArrayMiliWatt_Size - 1); // Max output power
+
+  PttTimeoutCntStartValue = RotaryEnc_PttTimeout.cntVal * LOOP_PTT_MULT_VALUE;
 
   s_mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???");
   //s_wifi_ssid_ascii_buf               = preferences.getString("ssid", "SSID??");
@@ -1251,6 +1304,7 @@ void setup() {
   Serial.print(F(" "));
   Serial.println(F(__DATE__));
   Serial.println();
+  Serial.print("Version: ");
   Serial.println(F(Program_Version));
   Serial.println();
   Serial.println();
@@ -1266,18 +1320,27 @@ void setup() {
   //setup hardware pins used by device, then check if device is found
   if (LT.begin(NSS, NRESET, RFBUSY, DIO1, DIO2, DIO3, RX_EN, TX_EN, LORA_DEVICE))  {
     Serial.println(F("SX128x LoRa device found"));
-    ledcWriteTone(9, 523);  // tone c
-    delay(30);
-    ledcWriteTone(9, 659);  // tone d
-    delay(60);
-    ledcWriteTone(9, 0);
+    ledcWriteTone(3, 659);  // tone d
+    delay(100);
+    ledcWriteTone(3, 0);
+    delay(100);
+    //
+    ledcWriteTone(3, 659);  // tone d
+    delay(400);
+    ledcWriteTone(3, 0);
+    delay(100);
+    //
+    ledcWriteTone(3, 659);  // tone d
+    delay(90);
+    ledcWriteTone(3, 0);
+    delay(100);
   } else {
     Serial.println(F("SX128x device not responding !"));
     while (1) {
       delay(20);
-      ledcWriteTone(9, 784);  // tone g
+      ledcWriteTone(3, 784);  // tone g
       delay(20);
-      ledcWriteTone(9, 0);
+      ledcWriteTone(3, 0);
     }
   }
 
