@@ -17,7 +17,7 @@
 // 1  6.0   130   -12
 // 0  3.0   125   -15
 //
-// SX128x datasheet p. 73:   Reg vale 0 = -18dBm, Reg value 31 = 13dBm  ==> PA of the module has gain of about 32.2 dB
+// SX128x datasheet:  Pout (dB) = -18 + Reg_Value
 //
 //
 
@@ -50,7 +50,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define ReadPushBtnVal()   pushBtnVal=digitalRead(ROTARY_ENC_PUSH)
 #define WAIT_Push_Btn_Release(milisec)  delay(milisec);while(digitalRead(ROTARY_ENC_PUSH)==0){}
 
-#define TIMER_PERIOD_USEC 2000     // 2500 = 2.5 msec
+#define TIMER_PERIOD_USEC 3500     // 2500 = 2.5 msec, 3500 = 3.5 msec
 
 
 // Webserver
@@ -153,8 +153,8 @@ enum set_text_state_t {
 // 12 25.96 394.457302075279
 // 13 26.66 463.446919736288
 //
-#define PowerArrayMiliWatt_Size 6
 //
+#define PowerArrayMiliWatt_Size 6
 // { Power_mW, Reg-setting }
 const uint32_t PowerArrayMiliWatt [][2] = {
   {  0,  0 },   // 0mW = no output power, special case
@@ -162,8 +162,7 @@ const uint32_t PowerArrayMiliWatt [][2] = {
   { 100, 4 },   // cca 100 mW
   { 200, 8 },   // cca 200 mW
   { 330, 11 },  // cca 300 mW
-  { 460, 13 }   // cca 460 mW
-
+  { 460, 13 }   // cca 460 mW       13+18 = 31  --> max value
 };
 //
 // Menu definition
@@ -331,6 +330,11 @@ void limitRotaryEncISR_values() {
 // Calculate duration of DOT from WPM
 void Calc_WPM_dot_delay ( uint32_t wpm) {
   WPM_dot_delay = (uint32_t) (double(1200.0) / (double) wpm);
+}
+
+// Calculate duration of DOT from WPM  - make it a bit longer so that UDP keyer plays slower
+void Calc_WPM_dot_delay_a_bit_slower ( uint32_t wpm) {
+  WPM_dot_delay = (uint32_t) (double(1200.0) / (double) wpm) + 1;
 }
 
 //
@@ -1162,19 +1166,17 @@ void IRAM_ATTR onTimer() {
   // SW debounce
   rotaryA_Val = (rotaryA_Val << 1 | (uint8_t)digitalRead(ROTARY_ENC_A)) & 0x0F;
   //
-  // Rising edge --> 0001
-  if (rotaryA_Val == 0x01) {
+  // Detecting edge --> 1110
+  if (rotaryA_Val == 0x0E) {
     rotaryB_Val = digitalRead(ROTARY_ENC_B);
     // Rotation speedup
     (ISR_cnt <= 12) ? cntIncrISR = RotaryEncISR.cntIncr << 4 : cntIncrISR = RotaryEncISR.cntIncr;
     ISR_cnt = 0;
     //
     if (rotaryB_Val == 0) {
-      RotaryEncISR.cntVal += cntIncrISR;
-      //RotaryEncISR.cntVal = RotaryEncISR.cntVal + cntIncrISR;
-    } else {
       RotaryEncISR.cntVal -= cntIncrISR;
-      //RotaryEncISR.cntVal = RotaryEncISR.cntVal - cntIncrISR;
+    } else {
+      RotaryEncISR.cntVal += cntIncrISR;
     }
   }
 
@@ -1215,7 +1217,7 @@ void setup() {
   // Timer for ISR which is processing rotary encoder events
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &onTimer, true);
-  timerAlarmWrite(timer, TIMER_PERIOD_USEC, true);  // 2500 = 2.5 msec
+  timerAlarmWrite(timer, TIMER_PERIOD_USEC, true);
   timerAlarmEnable(timer);
 
   RotaryEnc_FreqWord.cntVal  = FreqToRegWord(Frequency);
@@ -1226,15 +1228,14 @@ void setup() {
   // With MenuSelection we start counter at high value around 1 milion so that we can count up/down
   // The weird formula below using ...sizeof(TopMenuArray)... will just make sure that initial menu is at index 1 = "CQ..."
   RotaryEnc_MenuSelection    = { int(1000000/(sizeof(TopMenuArray) / sizeof(TopMenuArray[0]))) * (sizeof(TopMenuArray) / sizeof(TopMenuArray[0])) + 1, 0, 2000000, 1, 0}; 
-  //
-  RotaryEnc_KeyerSpeedWPM    = {20, 10, 40, 1, 0};
+  //  { cntVal, cntMin, cntMax, cntIncr, cntValOld } 
+  RotaryEnc_KeyerSpeedWPM    = {20,      10, 40, 1, 0};
   RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo
-  RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
-  RotaryEnc_BuzzerFreq       = {600, 0, 2000, 100, 0};
-  RotaryEnc_PttTimeout       = {300, 10, 2000, 10, 0};
-  RotaryEnc_OutPowerMiliWatt = {PowerArrayMiliWatt_Size - 1, 0, PowerArrayMiliWatt_Size - 1, 1, 0};
-  RotaryEnc_TextInput_Char_Index  = {65, 33, 127, 1, 66};
-
+  RotaryEnc_OffsetHz         = {Offset,  -100000, 100000, 100, 0};
+  RotaryEnc_BuzzerFreq       = {600,     0, 2000, 100, 0};
+  RotaryEnc_PttTimeout       = {300,     10, 2000, 10, 0};
+  RotaryEnc_OutPowerMiliWatt = {1,       0, PowerArrayMiliWatt_Size - 1, 1, 0};
+  RotaryEnc_TextInput_Char_Index = {65,  33, 127, 1, 66};
 
   // Get configuration values stored in EEPROM/FLASH
   preferences.begin("my-app", false);   // false = RW mode
@@ -1248,7 +1249,7 @@ void setup() {
   RotaryEnc_OffsetHz.cntVal         = preferences.getInt("OffsetHz", 0);
   RotaryEnc_BuzzerFreq.cntVal       = preferences.getInt("BuzzerFreq", 600);
   RotaryEnc_PttTimeout.cntVal       = preferences.getInt("PttTimeout", 300);
-  RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower", PowerArrayMiliWatt_Size - 1); // Max output power
+  RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower",  1); // Min output power
 
   PttTimeoutCntStartValue = RotaryEnc_PttTimeout.cntVal * LOOP_PTT_MULT_VALUE;
 
@@ -1256,15 +1257,15 @@ void setup() {
   //s_wifi_ssid_ascii_buf               = preferences.getString("ssid", "SSID??");
   //s_wifi_pwd_ascii_buf                = preferences.getString("password",  "PWD???");
 
-  dhcp = preferences.getBool("dhcp", 1);
-  con  = preferences.getBool("con", 0);
-  ssid = preferences.getString("ssid");
-  password = preferences.getString("password");
-  apikey = preferences.getString("apikey", "1111");
-  sIP        = preferences.getString("ip", "192.168.1.200");
-  sGateway   = preferences.getString("gateway", "192.168.1.1");
-  sSubnet    = preferences.getString("subnet", "255.255.255.0");
-  sPrimaryDNS = preferences.getString("pdns", "8.8.8.8");
+  dhcp          = preferences.getBool("dhcp", 1);
+  con           = preferences.getBool("con", 0);
+  ssid          = preferences.getString("ssid");
+  password      = preferences.getString("password");
+  apikey        = preferences.getString("apikey", "1111");
+  sIP           = preferences.getString("ip", "192.168.1.200");
+  sGateway      = preferences.getString("gateway", "192.168.1.1");
+  sSubnet       = preferences.getString("subnet", "255.255.255.0");
+  sPrimaryDNS   = preferences.getString("pdns", "8.8.8.8");
   sSecondaryDNS = preferences.getString("sdns", "8.8.4.4");
 
   //preferences.end();   -- do not call prefs.end since we assume writing to NV memory later in application
@@ -1577,7 +1578,7 @@ void setup() {
       // http://192.168.1.118/cfg-save?apikey=1111&localip=192.168.1.200&subnet=255.255.255.0&gateway=192.168.1.1&pdns=8.8.8.8&sdns=8.8.4.4&ssid=TP-Link&password=
       request->send(200, "text/plain", "Config saved - SSID:" + ssid + " APIKEY: " + apikey + " restart in 5 seconds");
       savePrefs();
-      delay(2000);
+      delay(1000);
       ESP.restart();
       //request->redirect("/");
     }
@@ -1680,7 +1681,7 @@ void setup() {
             sspeed = String(speed);
             //update_speed();
             RotaryEnc_KeyerSpeedWPM.cntVal = speed;
-            Calc_WPM_dot_delay (speed);
+            Calc_WPM_dot_delay_a_bit_slower (speed);
             display_status_bar();
             //Serial.print("UDP Speed: ");
             //Serial.print(bb);
@@ -1691,7 +1692,7 @@ void setup() {
             speed = ((uint32_t) packet.data()[6]);
             sspeed = String(speed);
             RotaryEnc_KeyerSpeedWPM.cntVal = speed;
-            Calc_WPM_dot_delay(speed);
+            Calc_WPM_dot_delay_a_bit_slower(speed);
             // Power
             tmp32a = ((uint32_t) packet.data()[7]);
             RotaryEnc_OutPowerMiliWatt.cntVal = tmp32a;
