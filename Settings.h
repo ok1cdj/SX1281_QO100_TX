@@ -45,7 +45,8 @@
 // https://www.esp32.com/viewtopic.php?t=13697 :
 // you can only use GPIO34 and higher as inputs, not outputs 
 
-#define Program_Version "v1.0"
+//#define Program_Version "v1.0"
+#define Program_Version "v1.1"     // Corrected edge processing from rotary encoder 0x0E instead 0x01)
 
 
 #define NSS 5                                  //select pin on LoRa device
