@@ -16,7 +16,7 @@
 //set to -1.
 
 
-// LoRa1281F27 Module from NiceRF
+// JU: LoRa1281F27 Module from NiceRF
 //
 // 1 VCC 		- 2.0-5.5v Connected to the positive pole of the power supply
 // 2 GND 		- Power ground
@@ -46,7 +46,9 @@
 // you can only use GPIO34 and higher as inputs, not outputs 
 
 //#define Program_Version "v1.0"
-#define Program_Version "v1.1"     // Corrected edge processing from rotary encoder 0x0E instead 0x01)
+//#define Program_Version "v1.1"   // Corrected edge processing from rotary encoder 0x0E instead 0x01)
+//#define Program_Version "v1.2"   // 2022-12-22 JU, Rotary encoder direction made configurable via menu
+#define Program_Version "v1.3"     // 2023-02-02 JU, Added support for Iambic-B keying. Based on request of Markus DL6YYM
 
 
 #define NSS 5                                  //select pin on LoRa device
