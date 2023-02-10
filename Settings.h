@@ -48,7 +48,9 @@
 //#define Program_Version "v1.0"
 //#define Program_Version "v1.1"   // Corrected edge processing from rotary encoder 0x0E instead 0x01)
 //#define Program_Version "v1.2"   // 2022-12-22 JU, Rotary encoder direction made configurable via menu
-#define Program_Version "v1.3"     // 2023-02-02 JU, Added support for Iambic-B keying. Based on request of Markus DL6YYM
+//#define Program_Version "v1.3"     // 2023-02-02 JU, Added support for Iambic-B keying. Based on request of Markus DL6YYM
+//#define Program_Version "v1.4"     // 2023-02-06 JU, fixing Iambic-B behaviour, ...
+#define Program_Version "v1.5"     // 2023-02-10 JU, again fixing Iambic-B behaviour, PTT fix, added configurable Messages1 which can be played over HTML form
 
 
 #define NSS 5                                  //select pin on LoRa device
