@@ -4,3 +4,9 @@ JU - comments to initial PCB revision from 24.08.2021:
   - move LD117ADT more to left or right so that we can put there distance pole for OLED display (right hole is OK, left one intersects with LD117ADT)
     Note: with max. output power the current drawn is very high and will not work with standard USB port. Solution is to set lower output power.
 --------------------------------------------------------
+JU 2022-07-26: 
+I have soldered micro-USB receptacle so that the SX1281_QO100_TX can be supplied by USB power bank.
+From micro-USB receptacle simply connect:
+- the 5V pin  (pin-1 = VBUS) to 5V rail on SX1281_QO100_TX
+- the GND pin (pin-5 = GND) to GND on SX1281_QO100_TX
+--------------------------------------------------------

@@ -17,6 +17,7 @@ Only one DIGI mode possible - SLOW Hellschreiber - need bigger dish than 80cm - 
 - WiFi client or AP mode
 - Web interface for WiFi config
 - Web interafce for tuning, change speed and power
+- New: PTT output on ESP32 module pin-12. This is logic signal, one must add external NPN/MOSFET. Configurable delay.
 
 ![alt text](https://raw.githubusercontent.com/ok1cdj/SX1281_QO100_TX/main/img/QO100-tx-purple.png)
 

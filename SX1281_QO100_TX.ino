@@ -17,7 +17,7 @@
 // 1  6.0   130   -12
 // 0  3.0   125   -15
 //
-// SX128x datasheet p. 73:   Reg vale 0 = -18dBm, Reg value 31 = 13dBm  ==> PA of the module has gain of about 32.2 dB
+// SX128x datasheet:  Pout (dB) = -18 + Reg_Value
 //
 //
 
@@ -50,7 +50,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define ReadPushBtnVal()   pushBtnVal=digitalRead(ROTARY_ENC_PUSH)
 #define WAIT_Push_Btn_Release(milisec)  delay(milisec);while(digitalRead(ROTARY_ENC_PUSH)==0){}
 
-#define TIMER_PERIOD_USEC 2000     // 2500 = 2.5 msec
+#define TIMER_PERIOD_USEC 2500     // 2500 = 2.5 msec, 3500 = 3.5 msec
 
 
 // Webserver
@@ -91,11 +91,15 @@ const char* PARAM_GATEWAY = "gateway";
 const char* PARAM_PDNS = "pdns";
 const char* PARAM_SDNS = "sdns";
 const char* PARAM_LOCALIP = "localip";
-const char* PARAM_CMD_B = "cmd_B";
-const char* PARAM_CMD_C = "cmd_C";
-const char* PARAM_CMD_D = "cmd_D";
-const char* PARAM_CMD_T = "cmd_T";
-const char* PARAM_VAL = "val";
+const char* PARAM_CMD_B   = "cmd_B";
+const char* PARAM_CMD_C   = "cmd_C";
+const char* PARAM_CMD_D   = "cmd_D";
+const char* PARAM_CMD_T   = "cmd_T";
+const char* PARAM_CMD_M1  = "cmd_M1";
+const char* PARAM_CMD_M2  = "cmd_M2";
+const char* PARAM_CMD_M3  = "cmd_M3";
+const char* PARAM_CMD_M4  = "cmd_M4";
+const char* PARAM_VAL     = "val";
 
 
 bool wifiConfigRequired = false;
@@ -123,6 +127,7 @@ enum state_t {
   S_SET_BUZZER_FREQ,
   S_SET_PTT_TIMEOUT,
   S_SET_TEXT_GENERIC,
+  S_SET_ROTARY_ENC_DIRECTION,
   S_WIFI_RECONNECT,
   S_RUN_BEACON,
   S_RUN_BEACON_HELL
@@ -132,7 +137,11 @@ enum state_t {
 enum set_text_state_t {
   S_SET_MY_CALL = 0,
   S_SET_WIFI_SSID,
-  S_SET_WIFI_PWD
+  S_SET_WIFI_PWD,
+  S_SET_M1_TEXT,          // Memory 1
+  S_SET_M2_TEXT,          // Memory 2
+  S_SET_M3_TEXT,          // Memory 3
+  S_SET_M4_TEXT           // Memory 4
 } set_text_state;
 
 
@@ -153,8 +162,8 @@ enum set_text_state_t {
 // 12 25.96 394.457302075279
 // 13 26.66 463.446919736288
 //
-#define PowerArrayMiliWatt_Size 6
 //
+#define PowerArrayMiliWatt_Size 6
 // { Power_mW, Reg-setting }
 const uint32_t PowerArrayMiliWatt [][2] = {
   {  0,  0 },   // 0mW = no output power, special case
@@ -162,8 +171,7 @@ const uint32_t PowerArrayMiliWatt [][2] = {
   { 100, 4 },   // cca 100 mW
   { 200, 8 },   // cca 200 mW
   { 330, 11 },  // cca 300 mW
-  { 460, 13 }   // cca 460 mW
-
+  { 460, 13 }   // cca 460 mW       13+18 = 31  --> max value
 };
 //
 // Menu definition
@@ -177,11 +185,16 @@ const char * TopMenuArray[] = {
   "7. Set Buzzer Freq",
   "8. Set PTT timeout",
   "9. Set My Call    ",
-  "10. Set WiFi SSID ",
-  "11. Set WiFi PWD  ",
-  "12. WiFi Reconnect",
-  "13. Beacon (vvv)  ",
-  "14. Beacon FHELL  "
+  "10. Set Play Mem_1",
+  "11. Set Play Mem_2",
+  "12. Set Play Mem_3",
+  "13. Set Play Mem_4",
+  "14. Set WiFi SSID ",
+  "15. Set WiFi PWD  ",
+  "16. WiFi Reconnect",
+  "17. Set EncoderDir",
+  "18. Beacon (vvv)  ",
+  "19. Beacon FHELL  "
 };
 //
 // Rotary Encoder structure
@@ -198,14 +211,20 @@ hw_timer_t * timer = NULL;
 //TFT_eSPI     tft   = TFT_eSPI();  // Invoke library, pins defined in User_Setup.h
 SX128XLT LT;                      // Create a library class instance called LT
 
+#define DOT  0
+#define DASH 1
 uint8_t  rotaryA_Val = 0xFF;
 uint8_t  rotaryB_Val = 0xFF;
+uint8_t  RotaryEnc_Pin_A = ROTARY_ENC_A;
+uint8_t  RotaryEnc_Pin_B = ROTARY_ENC_B;
 uint8_t  ISR_cnt = 0;
 uint8_t  cntIncrISR;
 uint32_t loopCnt = 0;
 uint32_t menuIndex;
 uint32_t timeout_cnt = 0;
 uint8_t  keyerVal      = 1;
+uint8_t  lastPlayedPad = DOT;
+uint8_t  iambicBfinishFlag;
 uint8_t  pushBtnVal    = 1;
 uint8_t  keyerCWstarted = 0;
 uint8_t  pushBtnPressed = 0;
@@ -215,18 +234,23 @@ uint32_t  tmp32a, tmp32b;
 uint32_t FreqWord = 0;
 uint32_t FreqWordNoOffset = 0;
 uint32_t WPM_dot_delay;
-int32_t PttTimeoutCnt;
-int32_t PttTimeoutCntStartValue;
+uint32_t WPM_dash_delay;
+uint32_t PttTimeoutCnt = 0; 
+uint32_t PttTimeoutCntStartValue;
 
 
 char   freq_ascii_buf[20];   // Buffer for formatting of FREQ value
-char   general_ascii_buf[40];
+char   general_ascii_buf[128];
 uint8_t general_ascii_buf_index = 0;
-char   mycall_ascii_buf[40];
-char   wifi_ssid_ascii_buf[40];
-char   wifi_pwd_ascii_buf[40];
+char   mycall_ascii_buf[64];
+char   wifi_ssid_ascii_buf[64];
+char   wifi_pwd_ascii_buf[64];
 bool   params_set_by_udp_packet = false;
 char   morse_c, morse_c_old;
+String   s_M1_ascii_buf;     // Memory-1
+String   s_M2_ascii_buf;     // Memory-2
+String   s_M3_ascii_buf;     // Memory-3
+String   s_M4_ascii_buf;     // Memory-4
 
 String s_mycall_ascii_buf;
 //String s_wifi_ssid_ascii_buf;
@@ -249,6 +273,7 @@ RotaryEncounters RotaryEnc_PttTimeout;
 RotaryEncounters RotaryEnc_OutPowerMiliWatt;
 RotaryEncounters RotaryEnc_TextInput_Char_Index;
 RotaryEncounters RotaryEncISR;
+RotaryEncounters RotaryEnc_RotaryEnc_Dir;
 
 Preferences preferences;
 
@@ -301,11 +326,15 @@ void display_status_bar () {
   display.setCursor(1, 1); // 7 is the font height
   display.print(s_mycall_ascii_buf);
   display.setCursor(52, 1); // 7 is the font height
-  if (RotaryEnc_KeyerType.cntVal & 0x00000001) {
-    display.print("Manual,");
+  if ((RotaryEnc_KeyerType.cntVal) == 1) {
+    display.print("Strgh,");
   } else {
     display.print(RotaryEnc_KeyerSpeedWPM.cntVal);
-    display.print("wpm, ");
+    if ((RotaryEnc_KeyerType.cntVal) == 0) {
+      display.print("wpA,");
+    } else {
+      display.print("wpB,");
+    }
   }
   display.print(PowerArrayMiliWatt[RotaryEnc_OutPowerMiliWatt.cntVal][0]);
   display.print("mW");
@@ -330,7 +359,14 @@ void limitRotaryEncISR_values() {
 
 // Calculate duration of DOT from WPM
 void Calc_WPM_dot_delay ( uint32_t wpm) {
-  WPM_dot_delay = (uint32_t) (double(1200.0) / (double) wpm);
+  WPM_dot_delay  = (uint32_t) (double(1200.0) / (double) wpm);
+  WPM_dash_delay = WPM_dot_delay+WPM_dot_delay+WPM_dot_delay;
+}
+
+// Calculate duration of DOT from WPM  - make it a bit longer so that UDP keyer plays slower
+void Calc_WPM_dot_delay_a_bit_slower ( uint32_t wpm) {
+  WPM_dot_delay  = (uint32_t) (double(1200.0) / (double) wpm) + 1;
+  WPM_dash_delay = WPM_dot_delay+WPM_dot_delay+WPM_dot_delay;
 }
 
 //
@@ -343,13 +379,14 @@ void Calc_WPM_dot_delay ( uint32_t wpm) {
 //
 // Start CW - from FS to TX mode
 void startCW() {
+  PttTimeoutCnt = PttTimeoutCntStartValue;
+  digitalWrite(PTT_OUT, 1);
   digitalWrite(LED1, LOW);
   ledcWriteTone(3, RotaryEnc_BuzzerFreq.cntVal);
   if (RotaryEnc_OutPowerMiliWatt.cntVal > 0) {
     LT.txEnable();
     LT.writeCommand(RADIO_SET_TXCONTINUOUSWAVE, 0, 0);
   }
-  PttTimeoutCnt = PttTimeoutCntStartValue;
 }
 
 // Stop CW - from TX to FS mode
@@ -432,6 +469,48 @@ void morseEncode2 ( uint8_t rxd ) {
     delay(WPM_dot_delay);
     delay(WPM_dot_delay);
     //
+}
+
+// Encoding a character to Morse code and playing it
+void morsePlay ( unsigned char rxd, int dotDelay) {
+  uint8_t i, j, m, mask, morse_len;
+
+  // rxd is already uppercase
+  //if (rxd >= 97 && rxd < 123) {   // > 'a' && < 'z'
+  //  rxd = rxd - 32;         // make the character uppercase
+  //}
+  //
+  if ((rxd < 97) && (rxd > 12)) {   // above 96 no valid Morse characters
+    m   = Morse_Coding_table[rxd - 32];
+    morse_len = (m >> 5) & 0x07;
+    mask = 0x10;
+    if (morse_len >= 6) {
+      morse_len = 6;
+      mask = 0x20;
+    }
+    //
+    for (i = 0; i < morse_len; i++) {
+      //startCW();
+      ledcWriteTone(3, 784);  // tone g
+      if ((m & mask) > 0x00) { // Dash
+        delay(dotDelay);
+        delay(dotDelay);
+        delay(dotDelay);
+      } else { // Dot
+        delay(dotDelay);
+      }
+      //stopCW();
+      ledcWriteTone(3, 0);
+      // Dot-wait between played dot/dash
+      delay(dotDelay);
+      mask = mask >> 1;
+    } //end for(i=0...
+    // Dash-wait between characters
+    delay(dotDelay);
+    delay(dotDelay);
+    delay(dotDelay);
+    //
+  } //if (rxd < 97...
 }
 
 
@@ -618,9 +697,27 @@ void messageQueueSend() {
   }
 }
 
+// delay and check if paddles released
+uint8_t wpm_delay_and_paddle_check (uint32_t delay_ms, uint8_t keyerReleaseMask2, uint8_t return_val_when_released) {
+  uint8_t return_val = 0;
+  // delay WPM_dot_delay with checking if paddles released
+  //delay(3);  
+  for(uint32_t d=0;d<delay_ms;d++) {
+    delay(1);  
+    if (RotaryEnc_KeyerType.cntVal == 2) {  // if Iambic-B keyer is configured (0 = Iambic-A, 1 = Straight, 2 = Iambic-B)
+      keyerVal = digitalRead(KEYER_DASH) << 1 | digitalRead(KEYER_DOT);
+      if ((keyerVal==0x03) || (keyerVal==keyerReleaseMask2)) { return_val = return_val_when_released;}  // if during dot/dash playing both keyers released then play additional dash/dot
+    }
+  }
+  return return_val;
+}
+
+
+
 void loop()
 {
   //-----------------------------------------
+  // RotaryEnc_KeyerType.cntVal -->   0 = Iambic-A, 1 = Straight, 2 = Iambic-B
   // -- Straight keyer
   if (RotaryEnc_KeyerType.cntVal & 0x00000001) {
     keyerVal = digitalRead(KEYER_DOT);
@@ -640,25 +737,62 @@ void loop()
     }
   } else {
     // -- Iambic keywer
-    // Keyer pressed DOT
     keyerVal   = digitalRead(KEYER_DASH) << 1 | digitalRead(KEYER_DOT);
-    if ((keyerVal & 0x01) == 0) {
+    iambicBfinishFlag=0;
+    switch(keyerVal) {
+      case 0x02:   // DOT
+        startCW();
+        //delay(WPM_dot_delay);
+        // here we set iambicBfinishFlag to 0 by passing PADS_NOT_SQUEEZED to function
+        wpm_delay_and_paddle_check(WPM_dot_delay, 0x02, 0); // delay WPM_dot_delay with checking if paddles released
+        stopCW();
+        wpm_delay_and_paddle_check(WPM_dot_delay, 0x02, 0);
+        lastPlayedPad = DOT;
+      break;
+      case 0x01:   // DASH
+        startCW();
+        // here we set iambicBfinishFlag to 0 by passing PADS_NOT_SQUEEZED to function
+        wpm_delay_and_paddle_check(WPM_dash_delay, 0x01, 0);
+        stopCW();
+        wpm_delay_and_paddle_check(WPM_dot_delay, 0x01, 0);  
+        lastPlayedPad = DASH;
+      break;
+      case 0x00:   // SQUEEZED = BOTH Paddles pressed
+        startCW();
+        if (lastPlayedPad == DOT) {
+          iambicBfinishFlag  = wpm_delay_and_paddle_check(WPM_dash_delay, 0x02, 1);
+          stopCW();
+          iambicBfinishFlag  += wpm_delay_and_paddle_check(WPM_dot_delay, 0x02, 1);
+          lastPlayedPad = DASH;
+          // here iambicBfinishFlag will have max 4
+        } else {
+          iambicBfinishFlag = wpm_delay_and_paddle_check(WPM_dot_delay, 0x01, 10);
+          stopCW();
+          iambicBfinishFlag += wpm_delay_and_paddle_check(WPM_dot_delay, 0x01, 10);
+          lastPlayedPad = DOT;
+          // here iambicBfinishFlag will have max 20
+        }
+      break;
+      case 0x03:    // No paddle pressed = no action
+      break;
+      default:
+      break;
+    }
+    //
+    // For Iambic-B keyer play finishing dot or dash if keys released 
+    if (iambicBfinishFlag > 0) {
       startCW();
       delay(WPM_dot_delay);
+      if (iambicBfinishFlag >= 10) {  // play DASH
+        delay(WPM_dot_delay);
+        delay(WPM_dot_delay);
+      }
       stopCW();
       delay(WPM_dot_delay);
+      iambicBfinishFlag=0;
     }
-    // Keyer pressed DASH
-    keyerVal   = digitalRead(KEYER_DASH) << 1 | digitalRead(KEYER_DOT);
-    if ((keyerVal & 0x02) == 0) {
-      startCW();
-      delay(WPM_dot_delay);
-      delay(WPM_dot_delay);
-      delay(WPM_dot_delay);
-      stopCW();
-      delay(WPM_dot_delay);
-    }
-  }
+
+  } // end else iambic keyer
   // Process timeout for display items other than main screen
   if (program_state != S_RUN_RUN) {
     if (timeout_cnt > 6000) {
@@ -801,8 +935,47 @@ void loop()
             RotaryEncISR.cntVal = s_general_ascii_buf[0];
             general_ascii_buf_index = 0;
             break;
-          // -----------------------------
+          // -----------------------------          
           case 9:
+            program_state  = S_SET_TEXT_GENERIC;
+            set_text_state = S_SET_M1_TEXT;
+            s_general_ascii_buf = s_M1_ascii_buf.substring(0);
+            RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
+            RotaryEncISR.cntVal = s_general_ascii_buf[0];
+            general_ascii_buf_index = 0;
+            break;
+
+
+          // -----------------------------          
+          case 10:
+            program_state  = S_SET_TEXT_GENERIC;
+            set_text_state = S_SET_M2_TEXT;
+            s_general_ascii_buf = s_M2_ascii_buf.substring(0);
+            RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
+            RotaryEncISR.cntVal = s_general_ascii_buf[0];
+            general_ascii_buf_index = 0;
+            break;
+          // -----------------------------          
+          case 11:
+            program_state  = S_SET_TEXT_GENERIC;
+            set_text_state = S_SET_M3_TEXT;
+            s_general_ascii_buf = s_M3_ascii_buf.substring(0);
+            RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
+            RotaryEncISR.cntVal = s_general_ascii_buf[0];
+            general_ascii_buf_index = 0;
+            break;
+          // -----------------------------          
+          case 12:
+            program_state  = S_SET_TEXT_GENERIC;
+            set_text_state = S_SET_M4_TEXT;
+            s_general_ascii_buf = s_M4_ascii_buf.substring(0);
+            RotaryEncPush(&RotaryEnc_TextInput_Char_Index);
+            RotaryEncISR.cntVal = s_general_ascii_buf[0];
+            general_ascii_buf_index = 0;
+            break;
+
+          // -----------------------------
+          case 13:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_WIFI_SSID;
             //s_general_ascii_buf = s_wifi_ssid_ascii_buf.substring(0);
@@ -812,7 +985,7 @@ void loop()
             general_ascii_buf_index = 0;
             break;
           // -----------------------------
-          case 10:
+          case 14:
             program_state  = S_SET_TEXT_GENERIC;
             set_text_state = S_SET_WIFI_PWD;
             //s_general_ascii_buf = s_wifi_pwd_ascii_buf.substring(0);
@@ -822,18 +995,23 @@ void loop()
             general_ascii_buf_index = 0;
             break;
           // -----------------------------
-          case 11:
+          case 15:
             program_state = S_WIFI_RECONNECT;
             break;
+          // -----------------------------          
+          case 16:
+            program_state  = S_SET_ROTARY_ENC_DIRECTION;
+            RotaryEncPush(&RotaryEnc_RotaryEnc_Dir); // makes RotaryEncISR.cntValOld different from RotaryEncISR.cntVal  ==> forces display update
+            break;
           // -----------------------------
-          case 12:
+          case 17:
             program_state = S_RUN_BEACON;
             display_valuefield_begin();
             display.print("BEACON...");
             display.display();
             break;
           // -----------------------------
-           case 13:
+           case 18:
             program_state = S_RUN_BEACON_HELL;
             display_valuefield_begin();
             display.print("FHELL BEACON");
@@ -943,9 +1121,22 @@ void loop()
     //--------------------------------
     case S_SET_KEYER_TYPE:
       if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        RotaryEncISR.cntVal = RotaryEncISR.cntVal % 3;  // limit values to 0-2 / 0 = Iambic-A, 1 = Straight, 2 = Iambic-B
         timeout_cnt = 0;
         display_valuefield_begin();
-        display.print(RotaryEncISR.cntVal % 2 ?  "Straight  " : "Iambic    ");
+        switch(RotaryEncISR.cntVal) {
+          case 0:
+            display.print("Iambic A  ");
+          break;
+          case 1:
+            display.print("Straight  ");
+          break;
+          case 2:
+            display.print("Iambic B  ");
+          break;
+          default:
+          break;
+        }
         display.display();
       }
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
@@ -955,6 +1146,32 @@ void loop()
         WAIT_Push_Btn_Release(200);
         preferences.putInt("KeyerType", RotaryEncISR.cntVal);
         RotaryEncPop(&RotaryEnc_KeyerType);
+        RotaryEncPush(&RotaryEnc_FreqWord);
+        program_state = S_RUN;
+      }
+      break;
+    //--------------------------------
+    case S_SET_ROTARY_ENC_DIRECTION:
+      if (RotaryEncISR.cntVal != RotaryEncISR.cntValOld) {
+        timeout_cnt = 0;
+        display_valuefield_begin();
+        display.print(RotaryEncISR.cntVal % 2 ?  "Rotary Up  " : "Rotary Dwn ");
+        display.display();
+      }
+      RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
+      //
+      ReadPushBtnVal();
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        WAIT_Push_Btn_Release(200);
+        preferences.putInt("RotaryEnc_Dir", RotaryEncISR.cntVal);
+        if (RotaryEncISR.cntVal & 0x00000001) {
+          RotaryEnc_Pin_A = ROTARY_ENC_A;
+          RotaryEnc_Pin_B = ROTARY_ENC_B;
+        } else {
+          RotaryEnc_Pin_A = ROTARY_ENC_B;
+          RotaryEnc_Pin_B = ROTARY_ENC_A;
+        }
+        RotaryEncPop(&RotaryEnc_RotaryEnc_Dir);
         RotaryEncPush(&RotaryEnc_FreqWord);
         program_state = S_RUN;
       }
@@ -1072,6 +1289,26 @@ void loop()
               password = s_general_ascii_buf.substring(0);
               break;
             //---------------------
+            case S_SET_M1_TEXT:
+              preferences.putString("M1", s_general_ascii_buf);
+              s_M1_ascii_buf = s_general_ascii_buf.substring(0);
+              break;
+            //---------------------
+            case S_SET_M2_TEXT:
+              preferences.putString("M2", s_general_ascii_buf);
+              s_M2_ascii_buf = s_general_ascii_buf.substring(0);
+              break;
+            //---------------------
+            case S_SET_M3_TEXT:
+              preferences.putString("M3", s_general_ascii_buf);
+              s_M3_ascii_buf = s_general_ascii_buf.substring(0);
+              break;
+            //---------------------
+            case S_SET_M4_TEXT:
+              preferences.putString("M4", s_general_ascii_buf);
+              s_M4_ascii_buf = s_general_ascii_buf.substring(0);
+              break;
+            //---------------------
             default:
               break;
           }
@@ -1160,21 +1397,21 @@ void IRAM_ATTR onTimer() {
   if (ISR_cnt != 255) ISR_cnt++;
   //
   // SW debounce
-  rotaryA_Val = (rotaryA_Val << 1 | (uint8_t)digitalRead(ROTARY_ENC_A)) & 0x0F;
+  //rotaryA_Val = (rotaryA_Val << 1 | (uint8_t)digitalRead(ROTARY_ENC_A)) & 0x0F;
+  rotaryA_Val = (rotaryA_Val << 1 | (uint8_t)digitalRead(RotaryEnc_Pin_A)) & 0x0F;   // v1.2 JU 
   //
-  // Rising edge --> 0001
-  if (rotaryA_Val == 0x01) {
-    rotaryB_Val = digitalRead(ROTARY_ENC_B);
+  // Detecting edge --> 1110
+  if (rotaryA_Val == 0x0E) {
+    //rotaryB_Val = digitalRead(ROTARY_ENC_B);
+    rotaryB_Val = digitalRead(RotaryEnc_Pin_B);   // v1.2 JU
     // Rotation speedup
     (ISR_cnt <= 12) ? cntIncrISR = RotaryEncISR.cntIncr << 4 : cntIncrISR = RotaryEncISR.cntIncr;
     ISR_cnt = 0;
     //
     if (rotaryB_Val == 0) {
-      RotaryEncISR.cntVal += cntIncrISR;
-      //RotaryEncISR.cntVal = RotaryEncISR.cntVal + cntIncrISR;
-    } else {
       RotaryEncISR.cntVal -= cntIncrISR;
-      //RotaryEncISR.cntVal = RotaryEncISR.cntVal - cntIncrISR;
+    } else {
+      RotaryEncISR.cntVal += cntIncrISR;
     }
   }
 
@@ -1195,10 +1432,18 @@ void setup() {
   if (!SPIFFS.begin()) {
     Serial.println("An Error has occurred while mounting SPIFFS");
     while (1) {
-      delay(20);
-      ledcWriteTone(3, 784);  // tone g
-      delay(20);
-      ledcWriteTone(3, 0);
+      morsePlay('E', 80);
+      morsePlay('R', 80);
+      morsePlay('R', 80);
+      morsePlay(' ', 80);
+      morsePlay('S', 80);
+      morsePlay('P', 80);
+      morsePlay('I', 80);
+      morsePlay('F', 80);
+      morsePlay('F', 80);
+      morsePlay('S', 80);
+      morsePlay(' ', 80);
+      delay(500);
     }
   }
 
@@ -1215,7 +1460,7 @@ void setup() {
   // Timer for ISR which is processing rotary encoder events
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &onTimer, true);
-  timerAlarmWrite(timer, TIMER_PERIOD_USEC, true);  // 2500 = 2.5 msec
+  timerAlarmWrite(timer, TIMER_PERIOD_USEC, true);
   timerAlarmEnable(timer);
 
   RotaryEnc_FreqWord.cntVal  = FreqToRegWord(Frequency);
@@ -1226,15 +1471,16 @@ void setup() {
   // With MenuSelection we start counter at high value around 1 milion so that we can count up/down
   // The weird formula below using ...sizeof(TopMenuArray)... will just make sure that initial menu is at index 1 = "CQ..."
   RotaryEnc_MenuSelection    = { int(1000000/(sizeof(TopMenuArray) / sizeof(TopMenuArray[0]))) * (sizeof(TopMenuArray) / sizeof(TopMenuArray[0])) + 1, 0, 2000000, 1, 0}; 
-  //
-  RotaryEnc_KeyerSpeedWPM    = {20, 10, 40, 1, 0};
+  //  { cntVal, cntMin, cntMax, cntIncr, cntValOld } 
+  RotaryEnc_KeyerSpeedWPM    = {20,      10, 40, 1, 0};
   RotaryEnc_KeyerType        = {1000000, 0, 2000000, 1, 0};   // We will implement modulo
-  RotaryEnc_OffsetHz         = {Offset, -100000, 100000, 100, 0};
-  RotaryEnc_BuzzerFreq       = {600, 0, 2000, 100, 0};
-  RotaryEnc_PttTimeout       = {300, 10, 2000, 10, 0};
-  RotaryEnc_OutPowerMiliWatt = {PowerArrayMiliWatt_Size - 1, 0, PowerArrayMiliWatt_Size - 1, 1, 0};
-  RotaryEnc_TextInput_Char_Index  = {65, 33, 127, 1, 66};
+  RotaryEnc_OffsetHz         = {Offset,  -100000, 100000, 100, 0};
+  RotaryEnc_BuzzerFreq       = {600,     0, 2000, 100, 0};
+  RotaryEnc_PttTimeout       = {300,     10, 2000, 10, 0};
+  RotaryEnc_RotaryEnc_Dir    = {1000000, 0, 2000000, 1, 0};   // We will implement modulo
 
+  RotaryEnc_OutPowerMiliWatt = {1,       0, PowerArrayMiliWatt_Size - 1, 1, 0};
+  RotaryEnc_TextInput_Char_Index = {65,  33, 127, 1, 66};
 
   // Get configuration values stored in EEPROM/FLASH
   preferences.begin("my-app", false);   // false = RW mode
@@ -1248,23 +1494,36 @@ void setup() {
   RotaryEnc_OffsetHz.cntVal         = preferences.getInt("OffsetHz", 0);
   RotaryEnc_BuzzerFreq.cntVal       = preferences.getInt("BuzzerFreq", 600);
   RotaryEnc_PttTimeout.cntVal       = preferences.getInt("PttTimeout", 300);
-  RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower", PowerArrayMiliWatt_Size - 1); // Max output power
+  RotaryEnc_OutPowerMiliWatt.cntVal = preferences.getInt("OutPower",  1); // Min output power
+  RotaryEnc_RotaryEnc_Dir.cntVal    = preferences.getInt("RotaryEnc_Dir",  0);
+  if (RotaryEnc_RotaryEnc_Dir.cntVal & 0x00000001) {
+    RotaryEnc_Pin_A = ROTARY_ENC_A;
+    RotaryEnc_Pin_B = ROTARY_ENC_B;
+  } else {
+    RotaryEnc_Pin_A = ROTARY_ENC_B;
+    RotaryEnc_Pin_B = ROTARY_ENC_A;
+  }
 
+  
   PttTimeoutCntStartValue = RotaryEnc_PttTimeout.cntVal * LOOP_PTT_MULT_VALUE;
 
   s_mycall_ascii_buf                  = preferences.getString("MyCall", "CALL???");
+  s_M1_ascii_buf   = preferences.getString("M1", "Your Message 1");
+  s_M2_ascii_buf   = preferences.getString("M2", "Your Message 2");
+  s_M3_ascii_buf   = preferences.getString("M3", "Your Message 3");
+  s_M4_ascii_buf   = preferences.getString("M4", "Your Message 4");
   //s_wifi_ssid_ascii_buf               = preferences.getString("ssid", "SSID??");
   //s_wifi_pwd_ascii_buf                = preferences.getString("password",  "PWD???");
 
-  dhcp = preferences.getBool("dhcp", 1);
-  con  = preferences.getBool("con", 0);
-  ssid = preferences.getString("ssid");
-  password = preferences.getString("password");
-  apikey = preferences.getString("apikey", "1111");
-  sIP        = preferences.getString("ip", "192.168.1.200");
-  sGateway   = preferences.getString("gateway", "192.168.1.1");
-  sSubnet    = preferences.getString("subnet", "255.255.255.0");
-  sPrimaryDNS = preferences.getString("pdns", "8.8.8.8");
+  dhcp          = preferences.getBool("dhcp", 1);
+  con           = preferences.getBool("con", 0);
+  ssid          = preferences.getString("ssid");
+  password      = preferences.getString("password");
+  apikey        = preferences.getString("apikey", "1111");
+  sIP           = preferences.getString("ip", "192.168.1.200");
+  sGateway      = preferences.getString("gateway", "192.168.1.1");
+  sSubnet       = preferences.getString("subnet", "255.255.255.0");
+  sPrimaryDNS   = preferences.getString("pdns", "8.8.8.8");
   sSecondaryDNS = preferences.getString("sdns", "8.8.4.4");
 
   //preferences.end();   -- do not call prefs.end since we assume writing to NV memory later in application
@@ -1273,7 +1532,14 @@ void setup() {
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
     Serial.println(F("SSD1306 allocation failed"));
-    //for(;;); // Don't proceed, loop forever
+      morsePlay('E', 80);
+      morsePlay('R', 80);
+      morsePlay('R', 80);
+      morsePlay(' ', 80);
+      morsePlay('D', 80);
+      morsePlay('I', 80);
+      morsePlay('S', 80);
+      morsePlay('P', 80);
   }
 
 
@@ -1337,10 +1603,17 @@ void setup() {
   } else {
     Serial.println(F("SX128x device not responding !"));
     while (1) {
-      delay(20);
-      ledcWriteTone(3, 784);  // tone g
-      delay(20);
-      ledcWriteTone(3, 0);
+      morsePlay('E', 80);
+      morsePlay('R', 80);
+      morsePlay('R', 80);
+      morsePlay(' ', 80);
+      morsePlay('S', 80);
+      morsePlay('X', 80);
+      morsePlay('1', 80);
+      morsePlay('2', 80);
+      morsePlay('8', 80);
+      morsePlay('0', 80);
+      delay(500);
     }
   }
 
@@ -1473,7 +1746,7 @@ void setup() {
       // Break
       if (request->hasParam(PARAM_CMD_B)) {
         scmd = request->getParam(PARAM_CMD_B)->value();
-        if (scmd.charAt(0) == 'B') {
+        if (scmd.charAt(0) == 'B') {  // 'B' = Break -- must be consistent with Break button name in html form
           xQueueReset( queue );
           stopCW();  // Just in case we were sending some carrier
         }
@@ -1481,7 +1754,7 @@ void setup() {
       // CQ
       if (request->hasParam(PARAM_CMD_C)) {
         scmd = request->getParam(PARAM_CMD_C)->value();
-        if (scmd.charAt(0) == 'C') {
+        if (scmd.charAt(0) == 'C') { // 'C' = CQ -- must be consistent with CQ button name in html form
           message = " ";
           message += cq_message_buf;
           message += s_mycall_ascii_buf;
@@ -1493,7 +1766,7 @@ void setup() {
       // DOTS
       if (request->hasParam(PARAM_CMD_D)) {
         scmd = request->getParam(PARAM_CMD_D)->value();
-        if (scmd.charAt(0) == 'D') {
+        if (scmd.charAt(0) == 'D') {   // 'D' = Dots -- must be consistent with Dots button name in html form
           message = " ";
           message += eee_message_buf;
           messageQueueSend();
@@ -1502,13 +1775,53 @@ void setup() {
       // Tune
       if (request->hasParam(PARAM_CMD_T)) {
         scmd = request->getParam(PARAM_CMD_T)->value();
-        if (scmd.charAt(0) == 'T') {
+        if (scmd.charAt(0) == 'T') {   // 'T' = Tune -- must be consistent with Tune button name in html form
           startCW();
           delay(3000);
           stopCW();
         }
       }      
+      // Memory-1 - the memory is configured from menu by Rotary button
+      if (request->hasParam(PARAM_CMD_M1)) {
+        scmd = request->getParam(PARAM_CMD_M1)->value();
+        if (scmd.charAt(1) == '1') {   // 'M1' = Send Memory-1 -- must be consistent with M1 button name in html form
+          message = " ";
+          message += s_M1_ascii_buf;
+          messageQueueSend();
+        }
+      }      
+      // Memory-2 - the memory is configured from menu by Rotary button
+      if (request->hasParam(PARAM_CMD_M2)) {
+        scmd = request->getParam(PARAM_CMD_M2)->value();
+        if (scmd.charAt(1) == '2') {   // 'M2' = Send Memory-2 -- must be consistent with M1 button name in html form
+          message = " ";
+          message += s_M2_ascii_buf;
+          messageQueueSend();
+        }
+      }      
+      // Memory-3 - the memory is configured from menu by Rotary button
+      if (request->hasParam(PARAM_CMD_M3)) {
+        scmd = request->getParam(PARAM_CMD_M3)->value();
+        if (scmd.charAt(1) == '3') {   // 'M3' = Send Memory-3 -- must be consistent with M1 button name in html form
+          message = " ";
+          message += s_M3_ascii_buf;
+          messageQueueSend();
+        }
+      }      
+      // Memory-4 - the memory is configured from menu by Rotary button
+      if (request->hasParam(PARAM_CMD_M4)) {
+        scmd = request->getParam(PARAM_CMD_M4)->value();
+        if (scmd.charAt(1) == '4') {   // 'M4' = Send Memory-4 -- must be consistent with M1 button name in html form
+          message = " ";
+          message += s_M4_ascii_buf;
+          messageQueueSend();
+        }
+      }      
 
+
+
+
+      //
       request->send(SPIFFS, "/index.html", String(), false,   processor);
 
     }
@@ -1577,7 +1890,7 @@ void setup() {
       // http://192.168.1.118/cfg-save?apikey=1111&localip=192.168.1.200&subnet=255.255.255.0&gateway=192.168.1.1&pdns=8.8.8.8&sdns=8.8.4.4&ssid=TP-Link&password=
       request->send(200, "text/plain", "Config saved - SSID:" + ssid + " APIKEY: " + apikey + " restart in 5 seconds");
       savePrefs();
-      delay(2000);
+      delay(1000);
       ESP.restart();
       //request->redirect("/");
     }
@@ -1680,7 +1993,7 @@ void setup() {
             sspeed = String(speed);
             //update_speed();
             RotaryEnc_KeyerSpeedWPM.cntVal = speed;
-            Calc_WPM_dot_delay (speed);
+            Calc_WPM_dot_delay_a_bit_slower (speed);
             display_status_bar();
             //Serial.print("UDP Speed: ");
             //Serial.print(bb);
@@ -1691,7 +2004,7 @@ void setup() {
             speed = ((uint32_t) packet.data()[6]);
             sspeed = String(speed);
             RotaryEnc_KeyerSpeedWPM.cntVal = speed;
-            Calc_WPM_dot_delay(speed);
+            Calc_WPM_dot_delay_a_bit_slower(speed);
             // Power
             tmp32a = ((uint32_t) packet.data()[7]);
             RotaryEnc_OutPowerMiliWatt.cntVal = tmp32a;

@@ -147,6 +147,12 @@
                 <div class="form-group">
                     <label for="message">Text</label>
                     <input type="text" class="form-control" id="message" name="message" data-mask="00/00/0000">
+                    <input type="submit" value="SEND"  class="btn btn-primary m-3"              title="Send Text" >
+		            <input type="submit" value="CQ" name="cmd_C"  class="btn btn-primary m-3"   title="Send CQ" >
+		            <input type="submit" value="M1" name="cmd_M1" class="btn btn-primary m-3"   title="Send Memory-1" >
+		            <input type="submit" value="M2" name="cmd_M2" class="btn btn-primary m-3"   title="Send Memory-2" >
+		            <input type="submit" value="M3" name="cmd_M3" class="btn btn-primary m-3"   title="Send Memory-3" >
+		            <input type="submit" value="M4" name="cmd_M4" class="btn btn-primary m-3"   title="Send Memory-4" >
                 </div>
                 <div class="form-group">
                     <label for="speed" class="form-label">Speed</label>
@@ -158,11 +164,9 @@
                     </div>
                 </div>
                 <div class="d-flex justify-content-center m-2">
-                    <input type="submit" value="Send"  class="btn btn-primary m-3">
                     <input type="submit" value="Break" name="cmd_B" class="btn btn-warning m-3">
 		            <input type="submit" value="Tune"  name="cmd_T" class="btn btn-danger m-3">
 		            <input type="submit" value="Dots"  name="cmd_D" class="btn btn-warning m-3">
-		            <input type="submit" value="CQ"    name="cmd_C" class="btn btn-primary m-3">
 				</div>
 
                 <input type="hidden" size="0" class="form-control form-control text-center" id="frq_index_input"
