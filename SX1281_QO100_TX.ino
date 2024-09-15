@@ -1424,9 +1424,9 @@ void setup() {
   // Setup pin as output for indicator LED or keying output (via Open-collector tranzistor)
   pinMode(LED1, OUTPUT);    
   // Configure BUZZER functionalities.
-  ledcSetup(3, 8000, 8);   //PWM Channel, Freq, Resolution
+  ledcSetup(9, 8000, 8);   //PWM Channel, Freq, Resolution
   /// Attach BUZZER pin.
-  ledcAttachPin(BUZZER, 3);  // Pin, Channel
+  ledcAttachPin(BUZZER, 9);  // Pin, Channel
 
   // Mount SPIFFS (filesystem, the HTML files must be flashed too by other utility)
   if (!SPIFFS.begin()) {
