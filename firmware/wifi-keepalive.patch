@@ -1,0 +1,52 @@
+--- a/SX1281_QO100_TX.ino
++++ b/SX1281_QO100_TX.ino
+@@ -714,8 +714,31 @@
+ 
+ 
+ 
++// --- WiFi keep-alive (added) ---
++// Log why the station got disconnected and reconnect from loop() if the core did not.
++volatile uint8_t wifiLastDisconnectReason = 0;
++uint32_t wifiLastReconnectTry = 0;
++
++void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
++  wifiLastDisconnectReason = info.wifi_sta_disconnected.reason;
++  Serial.printf("WiFi disconnected, reason %d\n", wifiLastDisconnectReason);
++}
++
++void WiFiKeepAlive() {
++  if (wifiSoftAP || WiFi.status() == WL_CONNECTED) {
++    return;
++  }
++  if (millis() - wifiLastReconnectTry > 10000) {   // try every 10 s
++    wifiLastReconnectTry = millis();
++    Serial.println("WiFi not connected, reconnecting...");
++    WiFi.disconnect();
++    WiFi.begin(ssid.c_str(), password.c_str());
++  }
++}
++
+ void loop()
+ {
++  WiFiKeepAlive();
+   //-----------------------------------------
+   // RotaryEnc_KeyerType.cntVal -->   0 = Iambic-A, 1 = Straight, 2 = Iambic-B
+   // -- Straight keyer
+@@ -1677,6 +1700,9 @@
+   if (!wifiConfigRequired)
+   {
+     WiFi.mode(WIFI_STA);
++    WiFi.persistent(false);
++    WiFi.setAutoReconnect(true);
++    WiFi.onEvent(WiFiStationDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+     Serial.println("Trying connect to " + ssid);
+     WiFi.begin(ssid.c_str(), password.c_str());
+     if (WiFi.waitForConnectResult() != WL_CONNECTED) {
+@@ -1685,6 +1711,7 @@
+       wifiConfigRequired = true;
+     }
+     if (!wifiConfigRequired) {
++      WiFi.setSleep(false);   // modem sleep makes some APs (TP-Link Deco) drop the station
+       Serial.print("WIFI IP Address: ");
+       IP = WiFi.localIP();
+       Serial.println(IP);

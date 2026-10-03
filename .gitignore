@@ -4,3 +4,5 @@ __pycache__/
 # PureBasic build output
 CWclient
 *.exe
+memories.json
+firmware/keyer_monitor.log

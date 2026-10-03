@@ -1,6 +1,13 @@
 {
-  "udp": {"host": "192.168.99.109", "port": 6789},
-  "station": {"call": "SV0SYH", "name": "ONDRA", "locator": "KN10LO"},
+  "udp": {
+    "host": "192.168.99.109",
+    "port": 6789
+  },
+  "station": {
+    "call": "SV0SYH",
+    "name": "ONDRA",
+    "locator": "KN10LO"
+  },
   "speed_wpm": 20,
   "macros": {
     "cq": "CQ CQ de {mycall} {mycall} K",
@@ -8,13 +15,24 @@
     "tu": "TU 73 de {mycall}",
     "de": "de {mycall} {mycall}"
   },
-  "cloudlog": {"url": "", "api_key": "", "station_id": ""},
+  "cloudlog": {
+    "url": "",
+    "api_key": "",
+    "station_id": ""
+  },
+  "keyer_web": {
+    "url": "http://192.168.99.109/",
+    "apikey": "1111",
+    "poll_s": 3,
+    "correction_hz": 0
+  },
   "adif": {
     "band": "13cm",
     "band_rx": "3cm",
     "freq": "2400.025",
     "freq_rx": "",
     "sat_name": "QO-100",
-    "sat_mode": "S/X"
+    "sat_mode": "S/X",
+    "rx_offset_mhz": 8089.5
   }
 }
