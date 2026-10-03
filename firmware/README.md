@@ -27,12 +27,25 @@ After switching to a TP-Link Deco X50 mesh the keyer drops off Wi-Fi, also when 
 - `WiFiKeepAlive()` in `loop()`: reconnect every 10 s while disconnected
 - disconnect reason printed on serial (`WiFi disconnected, reason N`)
 
-Not compiled or tested yet — to be tried on the spare board first.
+Compiles with PlatformIO (see below); not yet tested on hardware — to be tried on the spare board first.
 
 ```sh
 git clone https://github.com/ok1cdj/SX1281_QO100_TX && cd SX1281_QO100_TX
 git apply /path/to/pyCWdclient/firmware/wifi-keepalive.patch
 ```
+
+## Local copy vs. upstream
+
+`~/Arduino/SX1281_QO100_TX` (files from 2022-07-26) = upstream **v1.1**: `.ino` matches commit
+`a897fc2`, `Settings.h` `a398baa`, `data/index.html` `4fce136` (2021-11-08). Only
+`UDP_Test_script.py` differs (target IP). The keyer in the dish serves the v1.1 web page
+(no M1–M4 buttons), so it most likely runs this version.
+
+Upstream since then: v1.2 configurable rotary encoder direction, v1.3–v1.5 Iambic-B keying,
+PTT fix, configurable messages M1–M4 in the web UI. Wi-Fi code, `/frq`, `pwr`, Tune and Break
+are the same, so pyCWdclient works with both.
+
+The patch also applies to v1.1 (hunk 1 with fuzz, placed correctly before `loop()`) and builds.
 
 ## Building
 
@@ -43,6 +56,22 @@ git apply /path/to/pyCWdclient/firmware/wifi-keepalive.patch
 - Upload the `data/` folder to SPIFFS separately, otherwise the web UI is missing.
 - Suggested order: build and flash the unmodified firmware, check display / web UI / Deco
   connection, then apply the patch. Serial monitor at 115200 shows disconnect reasons.
+
+## PlatformIO
+
+`platformio.ini` here builds the firmware (espressif32@6.9.0 = Arduino core 2.0.17, esp32dev,
+ESP32Async web server libs). Verified 2026-10-03: upstream and patched build OK
+(Flash 69 %, RAM 14 %), SPIFFS image builds.
+
+```sh
+cd firmware
+git clone https://github.com/ok1cdj/SX1281_QO100_TX && cd SX1281_QO100_TX   # ignored by this repo
+cp ../platformio.ini . && git apply ../wifi-keepalive.patch
+pio run                 # build
+pio run -t upload       # flash firmware
+pio run -t uploadfs     # flash web UI (data/ -> SPIFFS); settings in NVS are kept
+pio device monitor      # serial 115200, shows "WiFi disconnected, reason N"
+```
 
 ## Monitoring
 

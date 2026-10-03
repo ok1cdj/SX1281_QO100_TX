@@ -31,6 +31,7 @@ Placeholders: `{mycall}`, `{name}`, `{myloc}` (from `station`), `{call}`, `{rst}
 | F4 | de .. |
 | F5 / Enter | Send free text |
 | Esc | Stop transmission (CW abort + keyer Break) |
+| F6 | Dots (keyer) |
 | PgUp / PgDn | Tune up / down by the selected step |
 
 `test.py` is a standalone UDP test script (sends a test message at 15 and 30 WPM).
@@ -49,8 +50,8 @@ and press GO/Enter to jump to it. Memories are saved to `memories.json` next to 
 `keyer_web.correction_hz` corrects the TCXO offset: set it to
 *real frequency (SDR/GPS) − frequency shown with correction 0*.
 
-## Tune and power
+## Dots and power
 
-`TUNE` sends a 3 s carrier (fixed in the keyer firmware; the keyer does not answer other requests
-meanwhile). STOP / Esc aborts CW and sends Break, which clears the keyer's CW queue.
+`DOTS` (F6) makes the keyer send a series of dots (25× E) for tuning onto the transponder.
+STOP / Esc aborts CW and sends Break, which clears the keyer's CW queue.
 Power is selected from the levels offered by the keyer and follows changes made in its web UI.

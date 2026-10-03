@@ -174,9 +174,8 @@ class KeyerWeb:
         self.power = value
 
     def command(self, name, label):
-        """Press a keyer form button, e.g. ("cmd_T", "Tune") or ("cmd_B", "Break")."""
-        # Tune keeps the keyer busy for 3 s before it answers
-        self._get("/", timeout=8, **{name: label})
+        """Press a keyer form button, e.g. ("cmd_D", "Dots") or ("cmd_B", "Break")."""
+        self._get("/", **{name: label})
 
     def set_index(self, index):
         index = self.clamp(index)
@@ -295,7 +294,6 @@ class App(tk.Tk):
         self.last_tune = 0.0
         self.pending_set = None
         self.last_power_set = 0.0
-        self.tuning = False
 
         self.title("QO100TX - CW Daemon Client")
         self.geometry("+10+20")
@@ -401,8 +399,7 @@ class App(tk.Tk):
         self.power_box = ttk.Combobox(frame, textvariable=self.power_var, state="readonly", width=6)
         self.power_box.grid(column=1, row=3, sticky="w", **pad)
         self.power_box.bind("<<ComboboxSelected>>", lambda e: self.set_power())
-        self.tune_button = tk.Button(frame, text="TUNE", fg="red", command=self.toggle_tune)
-        self.tune_button.grid(column=3, row=3, **pad)
+        tk.Button(frame, text="DOTS (F6)", command=self.send_dots).grid(column=3, row=3, **pad)
         return frame
 
     def _bind_keys(self):
@@ -413,6 +410,7 @@ class App(tk.Tk):
         self.bind("<F5>", lambda e: self.send_free())
         self.bind("<Escape>", lambda e: self.stop_tx())
         if self.keyer:
+            self.bind("<F6>", lambda e: self.send_dots())
             self.bind("<Prior>", lambda e: self.tune_step(1))
             self.bind("<Next>", lambda e: self.tune_step(-1))
 
@@ -470,36 +468,25 @@ class App(tk.Tk):
     def stop_tx(self):
         self.cw.abort()
         if self.keyer:
-            self.stop_tune()
+            self.send_break()
 
     # --- tune and power ---
 
-    def keyer_command(self, name, label, done_status, done=None):
+    def keyer_command(self, name, label, done_status):
         def on_done(_, error):
             if error:
                 log.warning("Keyer %s failed: %s", label, error)
                 self.set_status(f"{label} failed: {error}")
             else:
                 self.set_status(done_status)
-            if done:
-                done()
         self.worker.submit(lambda: self.keyer.command(name, label), on_done)
 
-    def toggle_tune(self):
-        """The keyer firmware sends a fixed 3 s carrier and cannot be interrupted meanwhile."""
-        if self.tuning:
-            return
-        self.tuning = True
-        self.tune_button.config(text="TUNE \u25cf", relief="sunken")
-        self.set_status("TUNE - carrier on for 3 s")
+    def send_dots(self):
+        """Series of dots (25x E) for tuning onto the transponder; STOP/Esc ends it."""
+        self.keyer_command("cmd_D", "Dots", "DOTS - Esc to stop")
 
-        def done():
-            self.tuning = False
-            self.tune_button.config(text="TUNE", relief="raised")
-        self.keyer_command("cmd_T", "Tune", "TUNE finished", done)
-
-    def stop_tune(self):
-        """Send Break: clears the keyer CW queue and stops any carrier (used by STOP/Esc)."""
+    def send_break(self):
+        """Break: clears the keyer CW queue and stops any carrier (used by STOP/Esc)."""
         self.keyer_command("cmd_B", "Break", "Break - TX stopped")
 
     def update_power_display(self):
