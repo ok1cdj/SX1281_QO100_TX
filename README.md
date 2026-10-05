@@ -34,6 +34,22 @@ Placeholders: `{mycall}`, `{name}`, `{myloc}` (from `station`), `{call}`, `{rst}
 | F6 | Dots (keyer) |
 | PgUp / PgDn | Tune up / down by the selected step |
 
+## Pythonista (iPad / iPhone)
+
+`pyCWdclient_ios.py` is the same client with a touch UI for [Pythonista 3](http://omz-software.com/pythonista/).
+The logic (cwdaemon, keyer, tuning, memories, ADIF, Cloudlog) is shared in `cwcore.py`;
+`pyCWdclient.py` is the Tk frontend.
+
+1. Copy `cwcore.py`, `pyCWdclient_ios.py` and your `config.json` into one Pythonista folder
+   (e.g. via iCloud Drive / the Files app). No extra packages are needed.
+2. Run `pyCWdclient_ios.py`. Allow *Local Network* access for Pythonista when iOS asks
+   (Settings → Pythonista → Local Network), otherwise UDP and the keyer are unreachable.
+3. Memories are stored in `memories.json` next to the config, separately from the desktop.
+
+Memories: *Save* stores the current frequency, *Memories* lists them — tap to tune, swipe left
+to delete. With a hardware keyboard: Esc = STOP, ⌘1–⌘4 = CQ / Report / TU 73 / de ..,
+⌘D = Dots, ⌘↑ / ⌘↓ = tune, ⌘L = Log QSO.
+
 `test.py` is a standalone UDP test script (sends a test message at 15 and 30 WPM).
 
 ## Frequency

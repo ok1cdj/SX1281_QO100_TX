@@ -7,3 +7,5 @@ CWclient
 memories.json
 firmware/keyer_monitor*.log
 firmware/SX1281_QO100_TX/
+crash.log
+firmware/*.bin
