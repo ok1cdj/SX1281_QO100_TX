@@ -29,6 +29,7 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncUDP.h>
 #include <SPIFFS.h>
+#include <Update.h>
 
 
 #include "time.h"
@@ -714,8 +715,103 @@ uint8_t wpm_delay_and_paddle_check (uint32_t delay_ms, uint8_t keyerReleaseMask2
 
 
 
+// --- WiFi keep-alive ---
+// Log why the station got disconnected and reconnect from loop() if the core did not.
+volatile uint8_t wifiLastDisconnectReason = 0;
+uint32_t wifiLastReconnectTry = 0;
+
+void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
+  wifiLastDisconnectReason = info.wifi_sta_disconnected.reason;
+  Serial.printf("WiFi disconnected, reason %d\n", wifiLastDisconnectReason);
+}
+
+void WiFiKeepAlive() {
+  if (wifiSoftAP || WiFi.status() == WL_CONNECTED) {
+    return;
+  }
+  if (millis() - wifiLastReconnectTry > 10000) {   // try every 10 s
+    wifiLastReconnectTry = millis();
+    Serial.println("WiFi not connected, reconnecting...");
+    WiFi.disconnect();
+    WiFi.begin(ssid.c_str(), password.c_str());
+  }
+}
+
+// --- OTA update ---
+// POST /ota?apikey=KEY[&target=fs] with a multipart file: firmware.bin, or spiffs.bin for the web files.
+bool otaOk = false;
+String otaMsg;
+uint32_t otaRestartAt = 0;
+
+bool otaAuthorized(AsyncWebServerRequest * request) {
+  return request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey;
+}
+
+bool otaIsFs(AsyncWebServerRequest * request, const String& filename) {
+  return (request->hasParam("target") && request->getParam("target")->value() == "fs") || filename.startsWith("spiffs");
+}
+
+void otaUpload(AsyncWebServerRequest * request, const String& filename, size_t index, uint8_t *data, size_t len, bool final) {
+  if (!otaAuthorized(request)) {
+    return;
+  }
+  bool fs = otaIsFs(request, filename);
+  if (index == 0) {
+    otaOk = false;
+    otaMsg = "";
+    stopCW();
+    digitalWrite(PTT_OUT, 0);
+    if (fs) SPIFFS.end();
+    Serial.printf("OTA start: %s -> %s\n", filename.c_str(), fs ? "spiffs" : "firmware");
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN, fs ? U_SPIFFS : U_FLASH)) {
+      otaMsg = Update.errorString();
+      return;
+    }
+  }
+  if (!Update.isRunning()) {
+    return;
+  }
+  if (Update.write(data, len) != len) {
+    otaMsg = Update.errorString();
+    Update.abort();
+    return;
+  }
+  if (final) {
+    if (Update.end(true)) {
+      otaOk = true;
+      Serial.printf("OTA done, %u bytes\n", index + len);
+    } else {
+      otaMsg = Update.errorString();
+    }
+  }
+}
+
+void otaResponse(AsyncWebServerRequest * request) {
+  if (!otaAuthorized(request)) {
+    request->send(401, "text/plain", "Unauthorized");
+    return;
+  }
+  if (otaOk) {
+    request->send(200, "text/plain", "OK, restarting");
+    otaRestartAt = (millis() + 1000) | 1;   // non-zero; restart from loop() so the response gets sent
+  } else {
+    if (otaMsg == "") otaMsg = "no file received";
+    Serial.println("OTA failed: " + otaMsg);
+    request->send(500, "text/plain", "OTA failed: " + otaMsg);
+    SPIFFS.begin();   // remount in case a filesystem update was aborted
+  }
+}
+
+void OtaRestartCheck() {
+  if (otaRestartAt && (int32_t)(millis() - otaRestartAt) >= 0) {
+    ESP.restart();
+  }
+}
+
 void loop()
 {
+  WiFiKeepAlive();
+  OtaRestartCheck();
   //-----------------------------------------
   // RotaryEnc_KeyerType.cntVal -->   0 = Iambic-A, 1 = Straight, 2 = Iambic-B
   // -- Straight keyer
@@ -1677,6 +1773,9 @@ void setup() {
   if (!wifiConfigRequired)
   {
     WiFi.mode(WIFI_STA);
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(true);
+    WiFi.onEvent(WiFiStationDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
     Serial.println("Trying connect to " + ssid);
     WiFi.begin(ssid.c_str(), password.c_str());
     if (WiFi.waitForConnectResult() != WL_CONNECTED) {
@@ -1685,6 +1784,7 @@ void setup() {
       wifiConfigRequired = true;
     }
     if (!wifiConfigRequired) {
+      WiFi.setSleep(false);   // modem sleep makes some APs (TP-Link Deco) drop the station
       Serial.print("WIFI IP Address: ");
       IP = WiFi.localIP();
       Serial.println(IP);
@@ -1948,6 +2048,8 @@ void setup() {
     request->send(SPIFFS, "/css/bootstrap4-toggle.min.css", "text/css");
   });
 
+
+  server.on("/ota", HTTP_POST, otaResponse, otaUpload);
 
   server.onNotFound(notFound);
 
