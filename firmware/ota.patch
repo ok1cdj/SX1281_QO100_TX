@@ -1,0 +1,173 @@
+diff --git a/SX1281_QO100_TX.ino b/SX1281_QO100_TX.ino
+index 6430370..817bcbb 100644
+--- a/SX1281_QO100_TX.ino
++++ b/SX1281_QO100_TX.ino
+@@ -29,6 +29,7 @@
+ #include <ESPAsyncWebServer.h>
+ #include <AsyncUDP.h>
+ #include <SPIFFS.h>
++#include <Update.h>
+ 
+ 
+ #include "time.h"
+@@ -736,9 +737,81 @@ void WiFiKeepAlive() {
+   }
+ }
+ 
++// --- OTA update (added) ---
++// POST /ota?apikey=KEY[&target=fs] with a multipart file: firmware.bin, or spiffs.bin for the web files.
++bool otaOk = false;
++String otaMsg;
++uint32_t otaRestartAt = 0;
++
++bool otaAuthorized(AsyncWebServerRequest * request) {
++  return request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey;
++}
++
++bool otaIsFs(AsyncWebServerRequest * request, const String& filename) {
++  return (request->hasParam("target") && request->getParam("target")->value() == "fs") || filename.startsWith("spiffs");
++}
++
++void otaUpload(AsyncWebServerRequest * request, const String& filename, size_t index, uint8_t *data, size_t len, bool final) {
++  if (!otaAuthorized(request)) {
++    return;
++  }
++  bool fs = otaIsFs(request, filename);
++  if (index == 0) {
++    otaOk = false;
++    otaMsg = "";
++    stopCW();
++    digitalWrite(PTT_OUT, 0);
++    if (fs) SPIFFS.end();
++    Serial.printf("OTA start: %s -> %s\n", filename.c_str(), fs ? "spiffs" : "firmware");
++    if (!Update.begin(UPDATE_SIZE_UNKNOWN, fs ? U_SPIFFS : U_FLASH)) {
++      otaMsg = Update.errorString();
++      return;
++    }
++  }
++  if (!Update.isRunning()) {
++    return;
++  }
++  if (Update.write(data, len) != len) {
++    otaMsg = Update.errorString();
++    Update.abort();
++    return;
++  }
++  if (final) {
++    if (Update.end(true)) {
++      otaOk = true;
++      Serial.printf("OTA done, %u bytes\n", index + len);
++    } else {
++      otaMsg = Update.errorString();
++    }
++  }
++}
++
++void otaResponse(AsyncWebServerRequest * request) {
++  if (!otaAuthorized(request)) {
++    request->send(401, "text/plain", "Unauthorized");
++    return;
++  }
++  if (otaOk) {
++    request->send(200, "text/plain", "OK, restarting");
++    otaRestartAt = (millis() + 1000) | 1;   // non-zero; restart from loop() so the response gets sent
++  } else {
++    if (otaMsg == "") otaMsg = "no file received";
++    Serial.println("OTA failed: " + otaMsg);
++    request->send(500, "text/plain", "OTA failed: " + otaMsg);
++    SPIFFS.begin();   // remount in case a filesystem update was aborted
++  }
++}
++
++void OtaRestartCheck() {
++  if (otaRestartAt && (int32_t)(millis() - otaRestartAt) >= 0) {
++    ESP.restart();
++  }
++}
++
+ void loop()
+ {
+   WiFiKeepAlive();
++  OtaRestartCheck();
+   //-----------------------------------------
+   // RotaryEnc_KeyerType.cntVal -->   0 = Iambic-A, 1 = Straight, 2 = Iambic-B
+   // -- Straight keyer
+@@ -1976,6 +2049,8 @@ void setup() {
+   });
+ 
+ 
++  server.on("/ota", HTTP_POST, otaResponse, otaUpload);
++
+   server.onNotFound(notFound);
+ 
+   server.begin();
+diff --git a/data/update.html b/data/update.html
+index 40f00c1..842e255 100644
+--- a/data/update.html
++++ b/data/update.html
+@@ -14,18 +14,61 @@
+                <h1>QO-100 TX</h1>
+             </div>
+             <div class="card-body">
+-               <form method="POST" action="/" id="form">
++               <form id="form">
+                   <label class="form-label" for="customFile">Update firmware</label>
+                   <div class="d-grid gap-3">
+-                     <input type="file" class="form-control" id="customFile" />
++                     <select class="form-select" id="target">
++                        <option value="fw">Firmware (firmware.bin)</option>
++                        <option value="fs">Web files (spiffs.bin)</option>
++                     </select>
++                     <input type="file" class="form-control" id="customFile" accept=".bin" />
+                      <div class="progress">
+-                        <div class="progress-bar" role="progressbar" style="width: 5%;" aria-valuenow="5" aria-valuemin="0" aria-valuemax="100">5%</div>
++                        <div class="progress-bar" role="progressbar" id="bar" style="width: 0px;"></div>
+                      </div>
++                     <div id="status"></div>
+                   </div>
+                   <div class="d-flex justify-content-center m-2">
+-                     <input type="submit" value="Update" class="btn btn-primary m-3">
++                     <input type="submit" value="Update" class="btn btn-primary m-3" id="submit">
+                   </div>
+                </form>
++               <script>
++                  // No percent sign here: the page goes through the server template processor.
++                  var PCT = String.fromCharCode(37);
++                  document.getElementById('form').onsubmit = function (e) {
++                     e.preventDefault();
++                     var file = document.getElementById('customFile').files[0];
++                     var status = document.getElementById('status');
++                     var bar = document.getElementById('bar');
++                     if (!file) { status.textContent = 'Choose a file first.'; return; }
++                     var data = new FormData();
++                     data.append('file', file, file.name);
++                     var xhr = new XMLHttpRequest();
++                     xhr.open('POST', '/ota?apikey=%APIKEY%&target=' + document.getElementById('target').value);
++                     xhr.upload.onprogress = function (ev) {
++                        if (ev.lengthComputable) {
++                           var p = Math.round(ev.loaded * 100 / ev.total);
++                           bar.style.width = p + PCT;
++                           bar.textContent = p + PCT;
++                        }
++                     };
++                     xhr.onload = function () {
++                        status.textContent = xhr.responseText;
++                        if (xhr.status == 200) {
++                           status.textContent += ' - reloading in 10 s';
++                           setTimeout(function () { window.location.href = '/?apikey=%APIKEY%'; }, 10000);
++                        } else {
++                           document.getElementById('submit').disabled = false;
++                        }
++                     };
++                     xhr.onerror = function () {
++                        status.textContent = 'Upload failed (connection error).';
++                        document.getElementById('submit').disabled = false;
++                     };
++                     document.getElementById('submit').disabled = true;
++                     status.textContent = 'Uploading, do not switch off...';
++                     xhr.send(data);
++                  };
++               </script>
+             </div>
+          </div>
+       </div>

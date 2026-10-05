@@ -1,6 +1,7 @@
 #!/bin/bash
+# Usage: keyer_monitor.sh [host]  (default: production keyer)
 # Ping the keyer every 5 s for 12 h; log state changes and a 10-min RTT summary.
-HOST=192.168.99.109
+HOST=${1:-192.168.99.109}
 LOG="${LOG:-$(dirname "$0")/keyer_monitor.log}"
 END=$(( $(date +%s) + 12*3600 ))
 state=unknown; down_since=0; rtts=(); fails=0; last_sum=$(date +%s)

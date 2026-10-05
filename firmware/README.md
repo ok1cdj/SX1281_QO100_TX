@@ -27,7 +27,8 @@ After switching to a TP-Link Deco X50 mesh the keyer drops off Wi-Fi, also when 
 - `WiFiKeepAlive()` in `loop()`: reconnect every 10 s while disconnected
 - disconnect reason printed on serial (`WiFi disconnected, reason N`)
 
-Compiles with PlatformIO (see below); not yet tested on hardware — to be tried on the spare board first.
+Tested 2026-10-05 on the spare board (v1.5 + patch): joins the Deco IoT network and stays up
+past the 5 minutes after which the original v1.1 used to drop; long-term test running.
 
 ```sh
 git clone https://github.com/ok1cdj/SX1281_QO100_TX && cd SX1281_QO100_TX
@@ -66,14 +67,39 @@ ESP32Async web server libs). Verified 2026-10-03: upstream and patched build OK
 ```sh
 cd firmware
 git clone https://github.com/ok1cdj/SX1281_QO100_TX && cd SX1281_QO100_TX   # ignored by this repo
-cp ../platformio.ini . && git apply ../wifi-keepalive.patch
+cp ../platformio.ini . && git apply ../wifi-keepalive.patch ../ota.patch
 pio run                 # build
 pio run -t upload       # flash firmware
 pio run -t uploadfs     # flash web UI (data/ -> SPIFFS); settings in NVS are kept
 pio device monitor      # serial 115200, shows "WiFi disconnected, reason N"
 ```
 
+Flashing over USB: the board's CH9102 (`/dev/ttyACM0`) does not auto-reset into the bootloader —
+hold BOOT and press EN (or replug USB) before each upload. `uploadfs` at the default 460800 baud
+failed once with "serial noise"; 115200 works:
+`esptool.py --chip esp32 --port /dev/ttyACM0 --baud 115200 write_flash 0x290000 .pio/build/esp32dev/spiffs.bin`
+
+## OTA — `ota.patch`
+
+Adds `POST /ota?apikey=KEY[&target=fs]` (multipart file) and makes the upstream `/update` page
+work (file upload with progress; choose Firmware or Web files). Firmware goes to the other OTA app
+slot of the default esp32dev partition table; `spiffs.bin` (or `target=fs`) rewrites the web files.
+TX is stopped before writing, the keyer restarts 1 s after a successful upload. Settings in NVS
+are kept. Only one USB flash is needed to get it on a board, then:
+
+```sh
+KEYER_APIKEY=1111 pio run -e ota -t upload      # firmware over Wi-Fi
+KEYER_APIKEY=1111 pio run -e ota -t uploadfs    # web files over Wi-Fi
+```
+
+(`upload_port` in `[env:ota]` is the spare board 192.168.99.190 — override with
+`--upload-port 192.168.99.109` for the keyer in the dish.) Or open `http://<keyer>/update?apikey=KEY`.
+Tested 2026-10-05 on the spare board: both firmware and SPIFFS over Wi-Fi OK.
+
+No rollback: the Arduino core bootloader does not verify that a new image starts. A firmware that
+crashes before Wi-Fi is up can only be fixed over USB — test every build on the spare board first.
+
 ## Monitoring
 
-`keyer_monitor.sh` pings the keyer every 5 s for 12 h, logs outages (3 lost pings) and
+`keyer_monitor.sh [host]` (default: the keyer in the dish, 192.168.99.109) pings the keyer every 5 s for 12 h, logs outages (3 lost pings) and
 a 10-minute RTT summary to `keyer_monitor.log` next to the script (override with `LOG=`).

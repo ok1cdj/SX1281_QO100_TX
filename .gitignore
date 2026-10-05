@@ -5,5 +5,5 @@ __pycache__/
 CWclient
 *.exe
 memories.json
-firmware/keyer_monitor.log
+firmware/keyer_monitor*.log
 firmware/SX1281_QO100_TX/
