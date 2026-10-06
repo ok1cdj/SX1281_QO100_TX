@@ -3,6 +3,9 @@
 Tk GUI client for [cwdaemon](https://github.com/acerion/cwdaemon) compatible keyers (e.g. an ESP32 keyer)
 for CW operation via QO-100. Sends CW macros over UDP and logs QSOs to [Cloudlog](https://github.com/magicbug/Cloudlog) as ADIF.
 
+Part of [SX1281_QO100_TX](https://github.com/ok1cdj/SX1281_QO100_TX) - the client for its keyer
+(CW and Feld Hell TX, Feld Hell RX, frequency and power control).
+
 ## Setup
 
 ```sh
@@ -50,7 +53,7 @@ Memories: *Save* stores the current frequency, *Memories* lists them — tap to 
 to delete. With a hardware keyboard: Esc = STOP, ⌘1–⌘4 = CQ / Report / TU 73 / de ..,
 ⌘D = Dots, ⌘↑ / ⌘↓ = tune, ⌘L = Log QSO.
 
-`test.py` is a standalone UDP test script (sends a test message at 15 and 30 WPM).
+`../UDP_Test_script.py` is a standalone UDP test script (sends a test message at 15 and 30 WPM).
 
 ## Frequency
 
@@ -90,5 +93,5 @@ Start RX, click the signal in the waterfall (0–3 kHz) to set the tone, adjust 
 contrast and Slant % if the text leans. Each column is drawn twice on top of each other, as in
 fldigi, so a full character is always readable in one of the copies.
 
-`python3 hellrx.py firmware/SX1281_QO100_TX/Settings.h out.pgm "TEXT"` decodes a generated
+`python3 hellrx.py ../Settings.h out.pgm "TEXT"` decodes a generated
 test signal offline (font read from the keyer firmware).

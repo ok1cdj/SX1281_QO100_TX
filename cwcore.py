@@ -23,8 +23,8 @@ from urllib.parse import urlencode
 log = logging.getLogger("pyCWdclient")
 
 DEFAULT_CONFIG = {
-    "udp": {"host": "192.168.99.109", "port": 6789},
-    "station": {"call": "SV0SYH", "name": "ONDRA", "locator": "KN10LO"},
+    "udp": {"host": "192.168.1.200", "port": 6789},
+    "station": {"call": "MYCALL", "name": "NAME", "locator": "AA00AA"},
     "speed_wpm": 20,
     "macros": {
         "cq": "CQ CQ de {mycall} {mycall} K",
@@ -35,7 +35,7 @@ DEFAULT_CONFIG = {
     "cloudlog": {"url": "", "api_key": "", "station_id": ""},
     # Keyer web UI; if url is set, TX frequency is shown, tunable and logged.
     # correction_hz = real frequency (SDR/GPS) - frequency computed by the keyer
-    "keyer_web": {"url": "http://192.168.99.109/", "apikey": "1111", "poll_s": 3, "correction_hz": 0},
+    "keyer_web": {"url": "http://192.168.1.200/", "apikey": "1111", "poll_s": 3, "correction_hz": 0},
     # Feld Hell receiver (Tk GUI on Linux): PulseAudio source for parec;
     # @DEFAULT_MONITOR@ = what plays in the default output (SDR in the headphones)
     "hell_rx": {"source": "@DEFAULT_MONITOR@", "tone_hz": 1000},

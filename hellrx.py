@@ -217,7 +217,7 @@ if __name__ == "__main__":
     # Offline test: python3 hellrx.py <Settings.h> <out.pgm> [text]
     import sys
     font = load_font(sys.argv[1])
-    text = sys.argv[3] if len(sys.argv) > 3 else " CQ CQ DE SV0SYH 599 +K "
+    text = sys.argv[3] if len(sys.argv) > 3 else " CQ CQ DE MYCALL 599 +K "
     rx = HellReceiver(tone_hz=1000, width=len(text) * 7 + 10)
     x = hell_signal(text, font, tone_hz=1000, rate_error=0.0, noise=0.2)
     rx.feed(x)
