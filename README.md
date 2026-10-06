@@ -26,7 +26,7 @@ Modes: CW and Feld Hell (122.5 Bd, decoded e.g. by fldigi). Feld Hell is sent as
   frequency and power control, QSO logging to Wavelog
 - Web interface usable on mobile phones
 
-![alt text](https://raw.githubusercontent.com/ok1cdj/SX1281_QO100_TX/main/img/QO100-tx-purple.png)
+![QO-100 TX](img/QO100-tx-purple.png)
 
 
 ## Python client (pyCWdclient)
@@ -92,5 +92,5 @@ Break (web, UDP) or the encoder push button stops Feld Hell and drops the rest o
 CW text is not sent while Feld Hell is being transmitted.
 
 ## User interface
-![alt text](https://raw.githubusercontent.com/ok1cdj/SX1281_QO100_TX/main/img/QO100-tx.png)
+![Web interface](img/QO100-tx.png)
 
