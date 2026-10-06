@@ -16,6 +16,11 @@ import pyperclip
 
 from cwcore import ConfigError, Session, check_cloudlog, load_config, make_session
 
+try:
+    import hellrx
+except ImportError:     # numpy missing - no Hell receiver
+    hellrx = None
+
 log = logging.getLogger("pyCWdclient")
 
 
@@ -52,6 +57,8 @@ class App(tk.Tk):
         self.session.on_freq = self.update_freq_display
         self.session.on_power = self.update_power_display
         self.session.on_memories = self.refresh_memories
+        if self.hell_rx:
+            self.protocol("WM_DELETE_WINDOW", self.close)
         self._dispatch()
         self.session.start()
 
@@ -108,6 +115,95 @@ class App(tk.Tk):
 
         tk.Label(self, textvariable=self.status_var, anchor="w").grid(
             column=1, row=8, columnspan=8, sticky="we", **pad)
+
+        self.hell_rx = None
+        if hellrx and hellrx.available():
+            self._build_hell_rx().grid(column=1, row=9, columnspan=8, sticky="we", **pad)
+
+    # Feld Hell receiver: image columns are drawn HELL_SCALE times bigger
+    HELL_COLUMNS = 350
+    HELL_SCALE = 2
+
+    def _build_hell_rx(self):
+        pad = {"padx": 2, "pady": 2}
+        cfg = self.session.config["hell_rx"]
+        self.hell_rx = hellrx.HellReceiver(cfg["source"], cfg["tone_hz"], width=self.HELL_COLUMNS)
+        width = self.HELL_COLUMNS * self.HELL_SCALE
+        frame = tk.LabelFrame(self, text="Feld Hell RX")
+
+        self.hell_btn = tk.Button(frame, text="Start RX", width=8, command=self.toggle_hell_rx)
+        self.hell_btn.grid(column=0, row=0, **pad)
+        self.hell_tone_var = tk.StringVar()
+        tk.Label(frame, textvariable=self.hell_tone_var, width=10).grid(column=1, row=0, **pad)
+        tk.Label(frame, text="Gain:").grid(column=2, row=0, **pad)
+        self.hell_gain = tk.Scale(frame, from_=0.5, to=4, resolution=0.1, orient="horizontal",
+                                  showvalue=False, length=100)
+        self.hell_gain.set(1.5)
+        self.hell_gain.grid(column=3, row=0, **pad)
+        tk.Label(frame, text="Slant %:").grid(column=4, row=0, **pad)
+        self.hell_slant_var = tk.StringVar(value="0.0")
+        slant = tk.Spinbox(frame, from_=-2, to=2, increment=0.05, width=5, textvariable=self.hell_slant_var,
+                           command=self.set_hell_slant)
+        slant.bind("<Return>", lambda e: self.set_hell_slant())
+        slant.grid(column=5, row=0, **pad)
+        tk.Button(frame, text="Clear", command=self.hell_rx.clear).grid(column=6, row=0, **pad)
+
+        # Waterfall 0..3 kHz, click to set the tone
+        self.hell_wf_img = tk.PhotoImage(width=width, height=40)
+        self.hell_wf = tk.Canvas(frame, width=width, height=40, highlightthickness=0, cursor="crosshair")
+        self.hell_wf.create_image(0, 0, image=self.hell_wf_img, anchor="nw")
+        self.hell_marker = self.hell_wf.create_line(0, 0, 0, 40, fill="red")
+        self.hell_wf.bind("<Button-1>", lambda e: self.set_hell_tone(e.x))
+        self.hell_wf.grid(column=0, row=1, columnspan=7, **pad)
+
+        height = 2 * hellrx.COLUMN * self.HELL_SCALE
+        self.hell_img = tk.PhotoImage(width=width, height=height)
+        tk.Label(frame, image=self.hell_img, borderwidth=0).grid(column=0, row=2, columnspan=7, **pad)
+        self._show_hell_tone()
+        return frame
+
+    def toggle_hell_rx(self):
+        if self.hell_rx.running():
+            self.hell_rx.stop()
+            self.hell_btn.config(text="Start RX")
+        else:
+            self.hell_rx.start()
+            self.hell_btn.config(text="Stop RX")
+            self._update_hell_rx()
+
+    def _update_hell_rx(self):
+        if not self.hell_rx.running():
+            self.hell_btn.config(text="Start RX")
+            if self.hell_rx.error:
+                self.status_var.set(f"Hell RX: {self.hell_rx.error}")
+            return
+        img, wf, _ = self.hell_rx.snapshot()
+        self.hell_img.configure(data=hellrx.to_pgm(img, self.hell_gain.get(), self.HELL_SCALE), format="PPM")
+        # Waterfall bright on dark: to_pgm draws high values dark
+        wf = (1 - wf).repeat(self.HELL_SCALE, axis=1)
+        self.hell_wf_img.configure(data=hellrx.to_pgm(wf), format="PPM")
+        self.after(100, self._update_hell_rx)
+
+    def set_hell_tone(self, x):
+        width = self.HELL_COLUMNS * self.HELL_SCALE
+        self.hell_rx.set_tone(x / width * hellrx.WATERFALL_MAX_HZ)
+        self._show_hell_tone()
+
+    def _show_hell_tone(self):
+        hz = self.hell_rx.tone_hz
+        x = hz / hellrx.WATERFALL_MAX_HZ * self.HELL_COLUMNS * self.HELL_SCALE
+        self.hell_wf.coords(self.hell_marker, x, 0, x, 40)
+        self.hell_tone_var.set(f"{hz:.0f} Hz")
+
+    def set_hell_slant(self):
+        try:
+            self.hell_rx.set_slant(float(self.hell_slant_var.get()) / 100)
+        except ValueError:
+            pass
+
+    def close(self):
+        self.hell_rx.stop()
+        self.destroy()
 
     def _build_freq_widgets(self):
         pad = {"padx": 2, "pady": 2}

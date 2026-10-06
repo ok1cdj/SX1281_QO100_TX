@@ -36,6 +36,9 @@ DEFAULT_CONFIG = {
     # Keyer web UI; if url is set, TX frequency is shown, tunable and logged.
     # correction_hz = real frequency (SDR/GPS) - frequency computed by the keyer
     "keyer_web": {"url": "http://192.168.99.109/", "apikey": "1111", "poll_s": 3, "correction_hz": 0},
+    # Feld Hell receiver (Tk GUI on Linux): PulseAudio source for parec;
+    # @DEFAULT_MONITOR@ = what plays in the default output (SDR in the headphones)
+    "hell_rx": {"source": "@DEFAULT_MONITOR@", "tone_hz": 1000},
     "adif": {
         "band": "13cm",
         "band_rx": "3cm",

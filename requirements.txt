@@ -1,1 +1,2 @@
 pyperclip
+numpy        # optional, Feld Hell receiver

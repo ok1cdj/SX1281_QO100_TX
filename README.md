@@ -71,3 +71,24 @@ and press GO/Enter to jump to it. Memories are saved to `memories.json` next to 
 `DOTS` (F6) makes the keyer send a series of dots (25× E) for tuning onto the transponder.
 STOP / Esc aborts CW and sends Break, which clears the keyer's CW queue.
 Power is selected from the levels offered by the keyer and follows changes made in its web UI.
+
+## Feld Hell
+
+The CW / Hell switch (F7, ⌘H on the iPad) sends macros and free text in Feld Hell instead of
+CW. Hell text goes to the keyer over its web API (`/hell?cmd=send`, needs `keyer_web` and
+keyer firmware v1.7+); messages sent while the keyer is still transmitting are appended.
+STOP sends Break, which also stops Hell. QSOs logged in Hell mode get `MODE=HELL`.
+
+### Receiving (Tk on Linux)
+
+The *Feld Hell RX* panel decodes Feld Hell from audio, e.g. a WebSDR playing in the
+browser. It needs `numpy` and `parec` (PulseAudio / PipeWire); without them the panel is
+hidden. Audio is taken from `hell_rx.source`, by default `@DEFAULT_MONITOR@` = whatever plays
+in the default output. A different source can be chosen in `pavucontrol` → Recording.
+
+Start RX, click the signal in the waterfall (0–3 kHz) to set the tone, adjust Gain for
+contrast and Slant % if the text leans. Each column is drawn twice on top of each other, as in
+fldigi, so a full character is always readable in one of the copies.
+
+`python3 hellrx.py firmware/SX1281_QO100_TX/Settings.h out.pgm "TEXT"` decodes a generated
+test signal offline (font read from the keyer firmware).
