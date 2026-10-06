@@ -2372,5 +2372,6 @@ String htmlEscape(String s) {
   s.replace("\"", "&quot;");
   s.replace("<", "&lt;");
   s.replace(">", "&gt;");
+  s.replace("%", "&#37;");   // the template engine would expand %CALL% in the returned value
   return s;
 }
