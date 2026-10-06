@@ -107,6 +107,7 @@ const char* PARAM_HELL_PAUSE  = "hell_pause";
 const char* PARAM_CMD_HELL    = "cmd_H";
 const char* PARAM_CMD_HELL_X  = "cmd_HX";
 const char* PARAM_CMD         = "cmd";
+const char* PARAM_TXT         = "txt";
 
 
 bool wifiConfigRequired = false;
@@ -280,6 +281,11 @@ volatile bool hellActive  = false;
 volatile bool hellStopReq = false;
 volatile bool morseSending = false;
 TaskHandle_t hellTaskHandle = NULL;
+// Text sent once from /hell?cmd=send - more text can be appended while it is being sent
+#define HELL_QUEUE_MAX  512
+String hellQueue;
+SemaphoreHandle_t hellMutex;          // guards hellQueue and the start/end of the Hell task
+volatile bool hellBeaconMode = false;
 
 RotaryEncounters RotaryEnc_FreqWord;
 RotaryEncounters RotaryEnc_MenuSelection;
@@ -1797,6 +1803,7 @@ void setup() {
   queue = xQueueCreate( 512, sizeof( char ) );
   xTaskCreatePinnedToCore(SendMorse, "Task1", 20000, NULL, 1, NULL,  0);
   // Higher priority than loop() on the same core - it sleeps most of each pixel, so loop() keeps running
+  hellMutex = xSemaphoreCreateMutex();
   xTaskCreatePinnedToCore(HellBeacon, "Hell", 4096, NULL, 2, &hellTaskHandle, 1);
 
 
@@ -2017,7 +2024,8 @@ void setup() {
   });
 
 
-  // Feld Hell beacon: /hell?apikey=..&cmd=start|stop  (optional hell_txt, hell_rep, hell_pause)
+  // Feld Hell: /hell?apikey=..&cmd=start|stop  - beacon (optional hell_txt, hell_rep, hell_pause)
+  //            /hell?apikey=..&cmd=send&txt=..  - send text once, appended to text being sent
   // Returns plain text "TX" or "stopped"
   server.on("/hell", HTTP_GET, [](AsyncWebServerRequest * request) {
     if (request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) {
@@ -2028,6 +2036,7 @@ void setup() {
         String c = request->getParam(PARAM_CMD)->value();
         if (c == "start") hellStart();
         if (c == "stop")  hellStop();
+        if (c == "send" && request->hasParam(PARAM_TXT)) hellSend(request->getParam(PARAM_TXT)->value());
       }
       request->send(200, "text/plain", hellActive ? "TX" : "stopped");
     } else request->send(401, "text/plain", "Unauthorized");
@@ -2318,29 +2327,52 @@ static bool hellPause(int seconds) {
   return true;
 }
 
+// Runs the beacon (hellBeaconMode) and then the text queue until it is empty
 void HellBeacon(void * parameter) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    String txt = s_hell_text;
-    txt.replace("%CALL%", s_mycall_ascii_buf);
-    txt.toUpperCase();
-    txt = " " + txt + " ";
     // Let the Morse character being sent finish
     while (morseSending && !hellStopReq) vTaskDelay(10);
-    for (int r = 0; !hellStopReq && (hell_repeat == 0 || r < hell_repeat); r++) {
-      if (r > 0 && !hellPause(hell_pause)) break;
-      hellNext = micros();
+    hellNext = micros();
+    hellSendChar(' ');
+    if (hellBeaconMode) {
+      String txt = s_hell_text;
+      txt.replace("%CALL%", s_mycall_ascii_buf);
+      txt.toUpperCase();
+      txt += " ";
+      for (int r = 0; !hellStopReq && (hell_repeat == 0 || r < hell_repeat); r++) {
+        if (r > 0) {
+          hellKey(false);
+          if (!hellPause(hell_pause)) break;
+          hellNext = micros();
+        }
+        for (unsigned int i = 0; i < txt.length(); i++) {
+          if (!hellSendChar(txt.charAt(i))) break;
+        }
+      }
+      hellBeaconMode = false;
+    }
+    for (;;) {
+      xSemaphoreTake(hellMutex, portMAX_DELAY);
+      String txt = hellQueue;
+      hellQueue = "";
+      if (txt.length() == 0 || hellStopReq) {
+        hellQueue = "";
+        hellKey(false);
+        hellActive = false;
+        xSemaphoreGive(hellMutex);
+        break;
+      }
+      xSemaphoreGive(hellMutex);
       for (unsigned int i = 0; i < txt.length(); i++) {
         if (!hellSendChar(txt.charAt(i))) break;
       }
-      hellKey(false);
     }
-    hellKey(false);
-    hellActive = false;
   }
 }
 
-void hellStart() {
+// Start the task if idle. Call with hellMutex taken.
+static void hellWake() {
   if (hellActive) return;
   xQueueReset(queue);   // drop queued Morse text
   hellStopReq = false;
@@ -2348,8 +2380,31 @@ void hellStart() {
   xTaskNotifyGive(hellTaskHandle);
 }
 
+void hellStart() {
+  xSemaphoreTake(hellMutex, portMAX_DELAY);
+  if (!hellActive) {
+    hellBeaconMode = true;
+    hellWake();
+  }
+  xSemaphoreGive(hellMutex);
+}
+
+// Send text once in Feld Hell, appended to the text being sent
+void hellSend(String text) {
+  text.toUpperCase();
+  xSemaphoreTake(hellMutex, portMAX_DELAY);
+  if (hellQueue.length() + text.length() <= HELL_QUEUE_MAX) {
+    hellQueue += text;
+  }
+  hellWake();
+  xSemaphoreGive(hellMutex);
+}
+
 void hellStop() {
+  xSemaphoreTake(hellMutex, portMAX_DELAY);
+  hellQueue = "";
   if (hellActive) hellStopReq = true;
+  xSemaphoreGive(hellMutex);
 }
 
 // Store beacon settings from web request parameters

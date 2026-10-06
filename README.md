@@ -69,6 +69,9 @@ Start/Stop from the web page, from the menu (*Beacon FHELL*) or by HTTP:
 curl "http://<keyer IP>/hell?apikey=<APIKEY>&cmd=start"   # cmd=stop, no cmd = status
 ```
 
+Any text can be sent once with `cmd=send&txt=<text>`; text sent while the keyer is still
+transmitting is appended (up to 512 characters). Break stops it and drops the rest.
+
 Break (web, UDP) or the encoder push button stops the beacon. CW text is not sent while it runs.
 
 ## User interface
