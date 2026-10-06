@@ -101,8 +101,8 @@
 </head>
 <body>
 
-<div class="d-flex justify-content-center m-md-5">
-    <div class="card">
+<div class="container d-flex justify-content-center my-2 my-md-5 px-2">
+    <div class="card w-100" style="max-width:600px">
         <div class="card-header bg-dark text-white text-center">
             <h1>QO-100 TX</h1>
             <h2>%MYCALL%</h2>
@@ -110,49 +110,43 @@
         <div class="card-body">
 
 			<form method="GET" action="/" name="myForm" id="myForm">
-            <div class="d-flex justify-content-end">
-               
-                <div style="max-width: 200px" class="mx-1">
-                    
-                    <div class="input-group">
-                        <button class="btn btn btn-outline-success" type="button" id="incrementMinus"
-                                style="min-width: 31px">
-                            -
-                        </button>
-                        
-                        <div style="visibility:hidden;padding-left:8px;padding-right:8px;display:flex;align-items:center" id="freq_val">2.400.000.000</div> 
-					    
-                        <button class="btn  btn btn-outline-success" type="button" id="incrementPlus"
-                                style="min-width:31px;">
-                            +
-                        </button>			
-                    </div>	
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                <div class="input-group flex-nowrap" style="width:auto">
+                    <button class="btn btn-outline-success" type="button" id="incrementMinus"
+                            style="min-width:31px">
+                        -
+                    </button>
+                    <div style="visibility:hidden;padding-left:8px;padding-right:8px;display:flex;align-items:center" id="freq_val">2.400.000.000</div>
+                    <button class="btn btn-outline-success" type="button" id="incrementPlus"
+                            style="min-width:31px">
+                        +
+                    </button>
                 </div>
-			<div style="max-width:150px;padding-left:60px;" class="mx-1">
-                   	 <select class="form-select" id="pwr" name="pwr" aria-label="PWR select" size="1" onchange="this.form.submit();">
+                <div class="d-flex align-items-center gap-2">
+                    <select class="form-select" id="pwr" name="pwr" aria-label="PWR select" size="1" style="width:auto" onchange="this.form.submit();">
                         %PWR%
                     </select>
-		</div>
-
-                <a href="cfg/?apikey=%APIKEY%" class="btn btn-secondary align-self-right">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"
-                         class="bi bi-gear-fill" viewBox="0 0 16 16">
-                        <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/>
-                    </svg>
-                </a>
+                    <a href="cfg/?apikey=%APIKEY%" class="btn btn-secondary">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"
+                             class="bi bi-gear-fill" viewBox="0 0 16 16">
+                            <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/>
+                        </svg>
+                    </a>
+                </div>
             </div>
 
-           
                 <input type="hidden" class="form-control" id="apikey" name="apikey" value="%APIKEY%">
                 <div class="form-group">
                     <label for="message">Text</label>
-                    <input type="text" class="form-control" id="message" name="message" data-mask="00/00/0000">
-                    <input type="submit" value="SEND"  class="btn btn-primary m-3"              title="Send Text" >
-		            <input type="submit" value="CQ" name="cmd_C"  class="btn btn-primary m-3"   title="Send CQ" >
-		            <input type="submit" value="M1" name="cmd_M1" class="btn btn-primary m-3"   title="Send Memory-1" >
-		            <input type="submit" value="M2" name="cmd_M2" class="btn btn-primary m-3"   title="Send Memory-2" >
-		            <input type="submit" value="M3" name="cmd_M3" class="btn btn-primary m-3"   title="Send Memory-3" >
-		            <input type="submit" value="M4" name="cmd_M4" class="btn btn-primary m-3"   title="Send Memory-4" >
+                    <input type="text" class="form-control" id="message" name="message">
+                    <div class="d-flex flex-wrap justify-content-center gap-2 my-3">
+                        <input type="submit" value="SEND"  class="btn btn-primary"              title="Send Text" >
+                        <input type="submit" value="CQ" name="cmd_C"  class="btn btn-primary"   title="Send CQ" >
+                        <input type="submit" value="M1" name="cmd_M1" class="btn btn-primary"   title="Send Memory-1" >
+                        <input type="submit" value="M2" name="cmd_M2" class="btn btn-primary"   title="Send Memory-2" >
+                        <input type="submit" value="M3" name="cmd_M3" class="btn btn-primary"   title="Send Memory-3" >
+                        <input type="submit" value="M4" name="cmd_M4" class="btn btn-primary"   title="Send Memory-4" >
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="speed" class="form-label">Speed</label>
@@ -163,17 +157,44 @@
                         <span class="p-1" id="sped-value">%SPEED%</span>WPM
                     </div>
                 </div>
-                <div class="d-flex justify-content-center m-2">
-                    <input type="submit" value="Break" name="cmd_B" class="btn btn-warning m-3">
-		            <input type="submit" value="Tune"  name="cmd_T" class="btn btn-danger m-3">
-		            <input type="submit" value="Dots"  name="cmd_D" class="btn btn-warning m-3">
-				</div>
+                <div class="d-flex flex-wrap justify-content-center gap-2 m-2">
+                    <input type="submit" value="Break" name="cmd_B" class="btn btn-warning">
+                    <input type="submit" value="Tune"  name="cmd_T" class="btn btn-danger">
+                    <input type="submit" value="Dots"  name="cmd_D" class="btn btn-warning">
+                </div>
 
                 <input type="hidden" size="0" class="form-control form-control text-center" id="frq_index_input"
                 name="frq_index" value="%FRQ_INDEX%">
 
             </form>
-            <div style="margin-left:auto;margin-right:auto;text-align:center">
+
+            <form method="GET" action="/" class="border-top pt-3 mt-3">
+                <input type="hidden" name="apikey" value="%APIKEY%">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong>Feld Hell beacon</strong>
+                    <span class="badge %HELL_BADGE%">%HELL_STATE%</span>
+                </div>
+                <label for="hell_txt" class="form-label">Text (%%CALL%% = my call)</label>
+                <input type="text" class="form-control mb-2" id="hell_txt" name="hell_txt" maxlength="64" value="%HELL_TXT%">
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    <div class="input-group" style="width:auto">
+                        <span class="input-group-text">Repeat</span>
+                        <input type="number" class="form-control" name="hell_rep" min="0" max="99" value="%HELL_REP%" style="width:5em" title="0 = until Stop">
+                    </div>
+                    <div class="input-group" style="width:auto">
+                        <span class="input-group-text">Pause</span>
+                        <input type="number" class="form-control" name="hell_pause" min="0" max="600" value="%HELL_PAUSE%" style="width:5.5em">
+                        <span class="input-group-text">s</span>
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap justify-content-center gap-2">
+                    <input type="submit" value="Save"  name="cmd_HS" class="btn btn-secondary">
+                    <input type="submit" value="Start" name="cmd_H"  class="btn btn-danger">
+                    <input type="submit" value="Stop"  name="cmd_HX" class="btn btn-warning">
+                </div>
+            </form>
+
+            <div class="text-center mt-3">
 					<!-- JU: This button must be outside of form so that only apikey is sent -->
 		<button type="button" class="btn btn-success" onClick="window.location.href = location.protocol + '//' + location.host + location.pathname +'?apikey=%APIKEY%';">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-clockwise" viewBox="0 0 16 16">
@@ -188,7 +209,7 @@
     </div>
 </div>
 
-<footer class="d-flex justify-content-center m-5">
+<footer class="d-flex justify-content-center my-3">
     &copy; OK1CDJ, OM2JU<a href="https://hamshop.cz" class="px-1">hamshop.cz</a>
 </footer>
 </body>

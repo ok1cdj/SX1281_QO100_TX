@@ -101,6 +101,13 @@ const char* PARAM_CMD_M2  = "cmd_M2";
 const char* PARAM_CMD_M3  = "cmd_M3";
 const char* PARAM_CMD_M4  = "cmd_M4";
 const char* PARAM_VAL     = "val";
+const char* PARAM_HELL_TXT    = "hell_txt";
+const char* PARAM_HELL_REP    = "hell_rep";
+const char* PARAM_HELL_PAUSE  = "hell_pause";
+const char* PARAM_CMD_HELL    = "cmd_H";
+const char* PARAM_CMD_HELL_X  = "cmd_HX";
+const char* PARAM_CMD         = "cmd";
+const char* PARAM_TXT         = "txt";
 
 
 bool wifiConfigRequired = false;
@@ -263,6 +270,22 @@ char   cq_message_buf[] =     "CQ CQ DE ";
 char   cq_message_end_buf[] = " +K";
 char   beacon_message_buf[] = "VVV  VVV  VVV  TEST  ";
 char   eee_message_buf[] =    "E E E E E E E E E E E E E E E E E E E E E E E E E";
+
+// Feld Hell beacon - text and repetition are stored in preferences, %CALL% is replaced by MyCall
+#define HELL_TEXT_MAX   64
+#define HELL_PIXEL_US   4082          // 1e6 / 245 - Feld Hell half-pixel (122.5 Bd)
+String s_hell_text;
+int    hell_repeat;                   // 0 = until stopped
+int    hell_pause;                    // seconds between repetitions
+volatile bool hellActive  = false;
+volatile bool hellStopReq = false;
+volatile bool morseSending = false;
+TaskHandle_t hellTaskHandle = NULL;
+// Text sent once from /hell?cmd=send - more text can be appended while it is being sent
+#define HELL_QUEUE_MAX  512
+String hellQueue;
+SemaphoreHandle_t hellMutex;          // guards hellQueue and the start/end of the Hell task
+volatile bool hellBeaconMode = false;
 
 RotaryEncounters RotaryEnc_FreqWord;
 RotaryEncounters RotaryEnc_MenuSelection;
@@ -554,6 +577,22 @@ String processor(const String& var) {
     return apikey;
   }
 
+  if (var == "HELL_TXT") {
+    return htmlEscape(s_hell_text);
+  }
+  if (var == "HELL_REP") {
+    return String(hell_repeat);
+  }
+  if (var == "HELL_PAUSE") {
+    return String(hell_pause);
+  }
+  if (var == "HELL_STATE") {
+    return hellActive ? "TX" : "stopped";
+  }
+  if (var == "HELL_BADGE") {
+    return hellActive ? "bg-danger" : "bg-secondary";
+  }
+
   if (var == "DHCP") {
 
     String rsp = "";
@@ -638,7 +677,8 @@ void SendMorse ( void * parameter) {
   Serial.print("Send morse Task running on core ");
   Serial.println(xPortGetCoreID());
   for (;;) { //infinite loop
-    if (xQueueReceive(queue, (void *)&morse_c, 0) == pdTRUE) {
+    if (!hellActive && xQueueReceive(queue, (void *)&morse_c, 0) == pdTRUE) {
+        morseSending = true;
         //Serial.printf("M %d %d %d", morse_c, morse_c_old, next_char_repeated_flag);
         //Serial.println();
         // From UDP_KEYER we are receiving:
@@ -682,6 +722,7 @@ void SendMorse ( void * parameter) {
           next_char_repeated_flag = false;
           morse_c_old = morse_c;
         }
+        morseSending = false;
       //
     } // end xQueueReceive....
     vTaskDelay(13);
@@ -952,7 +993,10 @@ void loop()
       RotaryEncISR.cntValOld = RotaryEncISR.cntVal;
       // This has to be at very end since with RotaryEncPush we are making RotaryEncISR.cntValOld different from RotaryEncISR.cntVal
       ReadPushBtnVal();
-      if (pushBtnVal == PUSH_BTN_PRESSED) {
+      if (pushBtnVal == PUSH_BTN_PRESSED && hellActive) {
+        hellStop();
+        WAIT_Push_Btn_Release(200);
+      } else if (pushBtnVal == PUSH_BTN_PRESSED) {
         WAIT_Push_Btn_Release(200);
         program_state = S_TOP_MENU_ITEMS;
         RotaryEncPop(&RotaryEnc_FreqWord);
@@ -1108,6 +1152,7 @@ void loop()
             break;
           // -----------------------------
            case 18:
+            hellStart();
             program_state = S_RUN_BEACON_HELL;
             display_valuefield_begin();
             display.print("FHELL BEACON");
@@ -1452,21 +1497,19 @@ void loop()
       break;
      //--------------------------------
     case S_RUN_BEACON_HELL:
-      //
-      for (int j = 0; j < 10; j++) {
-        pushBtnPressed = 0;
-        encode_hell("VVVV  TEST");
-        ReadPushBtnVal();
-        if (pushBtnVal == PUSH_BTN_PRESSED) {
-          pushBtnPressed = 1;
-          break;
-        }
+      // The beacon runs in HellBeacon task, here we only wait for its end or for the push button
+      timeout_cnt = 0;
+      ReadPushBtnVal();
+      if (pushBtnVal == PUSH_BTN_PRESSED) {
+        hellStop();
       }
-      WAIT_Push_Btn_Release(200);
-      RotaryEncPush(&RotaryEnc_FreqWord);
-      display_valuefield_begin();
-      display.display();
-      program_state = S_RUN;
+      if (!hellActive) {
+        WAIT_Push_Btn_Release(200);
+        RotaryEncPush(&RotaryEnc_FreqWord);
+        display_valuefield_begin();
+        display.display();
+        program_state = S_RUN;
+      }
       break;
     //--------------------------------
     default:
@@ -1608,6 +1651,9 @@ void setup() {
   s_M2_ascii_buf   = preferences.getString("M2", "Your Message 2");
   s_M3_ascii_buf   = preferences.getString("M3", "Your Message 3");
   s_M4_ascii_buf   = preferences.getString("M4", "Your Message 4");
+  s_hell_text      = preferences.getString("HellText", "%CALL% QO-100 FELDHELL TEST");
+  hell_repeat      = preferences.getInt("HellRep", 3);
+  hell_pause       = preferences.getInt("HellPause", 10);
   //s_wifi_ssid_ascii_buf               = preferences.getString("ssid", "SSID??");
   //s_wifi_pwd_ascii_buf                = preferences.getString("password",  "PWD???");
 
@@ -1756,6 +1802,9 @@ void setup() {
   //
   queue = xQueueCreate( 512, sizeof( char ) );
   xTaskCreatePinnedToCore(SendMorse, "Task1", 20000, NULL, 1, NULL,  0);
+  // Higher priority than loop() on the same core - it sleeps most of each pixel, so loop() keeps running
+  hellMutex = xSemaphoreCreateMutex();
+  xTaskCreatePinnedToCore(HellBeacon, "Hell", 4096, NULL, 2, &hellTaskHandle, 1);
 
 
 
@@ -1847,6 +1896,7 @@ void setup() {
       if (request->hasParam(PARAM_CMD_B)) {
         scmd = request->getParam(PARAM_CMD_B)->value();
         if (scmd.charAt(0) == 'B') {  // 'B' = Break -- must be consistent with Break button name in html form
+          hellStop();
           xQueueReset( queue );
           stopCW();  // Just in case we were sending some carrier
         }
@@ -1921,6 +1971,16 @@ void setup() {
 
 
 
+      // Feld Hell beacon - settings come with every submit of the Hell form (Save / Start / Stop)
+      if (request->hasParam(PARAM_HELL_TXT)) {
+        hellSaveSettings(request);
+      }
+      if (request->hasParam(PARAM_CMD_HELL)) {
+        hellStart();
+      }
+      if (request->hasParam(PARAM_CMD_HELL_X)) {
+        hellStop();
+      }
       //
       request->send(SPIFFS, "/index.html", String(), false,   processor);
 
@@ -1963,6 +2023,24 @@ void setup() {
     }
   });
 
+
+  // Feld Hell: /hell?apikey=..&cmd=start|stop  - beacon (optional hell_txt, hell_rep, hell_pause)
+  //            /hell?apikey=..&cmd=send&txt=..  - send text once, appended to text being sent
+  // Returns plain text "TX" or "stopped"
+  server.on("/hell", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (request->hasParam(PARAM_APIKEY) && request->getParam(PARAM_APIKEY)->value() == apikey) {
+      if (request->hasParam(PARAM_HELL_TXT)) {
+        hellSaveSettings(request);
+      }
+      if (request->hasParam(PARAM_CMD)) {
+        String c = request->getParam(PARAM_CMD)->value();
+        if (c == "start") hellStart();
+        if (c == "stop")  hellStop();
+        if (c == "send" && request->hasParam(PARAM_TXT)) hellSend(request->getParam(PARAM_TXT)->value());
+      }
+      request->send(200, "text/plain", hellActive ? "TX" : "stopped");
+    } else request->send(401, "text/plain", "Unauthorized");
+  });
 
   server.on("/cfg", HTTP_GET, [](AsyncWebServerRequest * request)
   {
@@ -2084,6 +2162,7 @@ void setup() {
         switch (command ) {
           //--------------------------
           case 0: //break cw
+            hellStop();
             xQueueReset( queue );
             break;
           //--------------------------
@@ -2197,42 +2276,157 @@ void format_freq(uint32_t n, char *out, bool params_set_by_udp_pkt)
 }
 
 ///////////////////////////////////////////////////////////
-// This is the heart of the beacon.  Given a character, it finds the
-// appropriate glyph and toggles output from the LoRa module to key the
-// Feld Hell signal.
-void encodechar(int ch) {
-    int i, x, y, fch;
-    word fbits;
-     for (i=0; i<NGLYPHS; i++) {
-        // Check each element of the glyphtab to see if we've found the
-        // character we're trying to send.
-        fch = pgm_read_byte(&glyphtab[i].ch);
-        if (fch == ch) {
-            // Found the character, now fetch the pattern to be transmitted,
-            // one column at a time.
-            for (x=0; x<7; x++) {
-                fbits = pgm_read_word(&(glyphtab[i].col[x]));
-                // Transmit (or do not tx) one 'pixel' at a time; characters
-                // are 7 cols by 14 rows.
-                for (y=0; y<14; y++) {
-                    if (fbits & (1<<y)) {
-                      startCW(); //TX tone
-                    } else {
-                      stopCW();  //TX tone off
-                    }
-                         
-                    delayMicroseconds(4060);
-                }
-            }
-            break; // We've found and transmitted the char,
-                   // so exit the for loop
-        }
-    }
+// Feld Hell beacon
+// Characters are 7 columns of 14 half-pixels (bit 0 = bottom), 245 half-pixels/s.
+// Compatible with Feld Hell mode in fldigi.
+
+static bool hellKeyed = false;
+static uint32_t hellNext;   // deadline of the current pixel (micros)
+
+// Key the transmitter only on a change - avoids SPI commands and PTT/LED toggling every pixel
+static void hellKey(bool on) {
+  if (on == hellKeyed) return;
+  hellKeyed = on;
+  if (on) startCW(); else stopCW();
 }
 
-////////////////////////////////////////////////////////////////// 
-// Loop through the string, transmitting one character at a time.
-void encode_hell(char *str) {
-    while (*str != '\0') 
-        encodechar(*str++) ;
+// Wait until the pixel deadline: sleep while it is far, then spin for the exact time
+static void hellWaitPixel() {
+  hellNext += HELL_PIXEL_US;
+  while ((int32_t)(hellNext - micros()) > 1500) vTaskDelay(1);
+  while ((int32_t)(hellNext - micros()) > 0) { }
+}
+
+// Send one character, unknown ones as a space. Returns false when stop was requested.
+static bool hellSendChar(char ch) {
+  int g = 0;   // glyphtab[0] is space
+  for (int i = 0; i < NGLYPHS; i++) {
+    if (pgm_read_byte(&glyphtab[i].ch) == ch) {
+      g = i;
+      break;
+    }
+  }
+  for (int x = 0; x < 7; x++) {
+    if (hellStopReq) return false;
+    PttTimeoutCnt = PttTimeoutCntStartValue;   // keep PTT on during the whole beacon
+    word fbits = pgm_read_word(&(glyphtab[g].col[x]));
+    for (int y = 0; y < 14; y++) {
+      hellKey(fbits & (1 << y));
+      hellWaitPixel();
+    }
+  }
+  return true;
+}
+
+// Sleep for the pause between repetitions. Returns false when stop was requested.
+static bool hellPause(int seconds) {
+  for (int i = 0; i < seconds * 10; i++) {
+    if (hellStopReq) return false;
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  return true;
+}
+
+// Runs the beacon (hellBeaconMode) and then the text queue until it is empty
+void HellBeacon(void * parameter) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // Let the Morse character being sent finish
+    while (morseSending && !hellStopReq) vTaskDelay(10);
+    hellNext = micros();
+    hellSendChar(' ');
+    if (hellBeaconMode) {
+      String txt = s_hell_text;
+      txt.replace("%CALL%", s_mycall_ascii_buf);
+      txt.toUpperCase();
+      txt += " ";
+      for (int r = 0; !hellStopReq && (hell_repeat == 0 || r < hell_repeat); r++) {
+        if (r > 0) {
+          hellKey(false);
+          if (!hellPause(hell_pause)) break;
+          hellNext = micros();
+        }
+        for (unsigned int i = 0; i < txt.length(); i++) {
+          if (!hellSendChar(txt.charAt(i))) break;
+        }
+      }
+      hellBeaconMode = false;
+    }
+    for (;;) {
+      xSemaphoreTake(hellMutex, portMAX_DELAY);
+      String txt = hellQueue;
+      hellQueue = "";
+      if (txt.length() == 0 || hellStopReq) {
+        hellQueue = "";
+        hellKey(false);
+        hellActive = false;
+        xSemaphoreGive(hellMutex);
+        break;
+      }
+      xSemaphoreGive(hellMutex);
+      for (unsigned int i = 0; i < txt.length(); i++) {
+        if (!hellSendChar(txt.charAt(i))) break;
+      }
+    }
+  }
+}
+
+// Start the task if idle. Call with hellMutex taken.
+static void hellWake() {
+  if (hellActive) return;
+  xQueueReset(queue);   // drop queued Morse text
+  hellStopReq = false;
+  hellActive = true;
+  xTaskNotifyGive(hellTaskHandle);
+}
+
+void hellStart() {
+  xSemaphoreTake(hellMutex, portMAX_DELAY);
+  if (!hellActive) {
+    hellBeaconMode = true;
+    hellWake();
+  }
+  xSemaphoreGive(hellMutex);
+}
+
+// Send text once in Feld Hell, appended to the text being sent
+void hellSend(String text) {
+  text.toUpperCase();
+  xSemaphoreTake(hellMutex, portMAX_DELAY);
+  if (hellQueue.length() + text.length() <= HELL_QUEUE_MAX) {
+    hellQueue += text;
+  }
+  hellWake();
+  xSemaphoreGive(hellMutex);
+}
+
+void hellStop() {
+  xSemaphoreTake(hellMutex, portMAX_DELAY);
+  hellQueue = "";
+  if (hellActive) hellStopReq = true;
+  xSemaphoreGive(hellMutex);
+}
+
+// Store beacon settings from web request parameters
+void hellSaveSettings(AsyncWebServerRequest * request) {
+  s_hell_text = request->getParam(PARAM_HELL_TXT)->value().substring(0, HELL_TEXT_MAX);
+  s_hell_text.toUpperCase();
+  if (request->hasParam(PARAM_HELL_REP)) {
+    hell_repeat = constrain(request->getParam(PARAM_HELL_REP)->value().toInt(), 0, 99);
+  }
+  if (request->hasParam(PARAM_HELL_PAUSE)) {
+    hell_pause = constrain(request->getParam(PARAM_HELL_PAUSE)->value().toInt(), 0, 600);
+  }
+  preferences.putString("HellText", s_hell_text);
+  preferences.putInt("HellRep", hell_repeat);
+  preferences.putInt("HellPause", hell_pause);
+}
+
+String htmlEscape(String s) {
+  s.replace("&", "&amp;");
+  s.replace("\"", "&quot;");
+  s.replace("<", "&lt;");
+  s.replace(">", "&gt;");
+  s.replace("%", "&#37;");   // the template engine would expand %CALL% in the returned value
+  return s;
 }
