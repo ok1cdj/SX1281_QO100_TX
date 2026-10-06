@@ -43,6 +43,7 @@ class App(tk.Tk):
         self.goto_var = tk.StringVar()
         self.memory_var = tk.StringVar()
         self.power_var = tk.StringVar()
+        self.mode_var = tk.StringVar(value="CW")
 
         self._build_widgets()
         self._bind_keys()
@@ -93,6 +94,12 @@ class App(tk.Tk):
         tk.Spinbox(self, from_=10, to=30, width=3, textvariable=self.speed_var).grid(column=2, row=5, **pad)
         tk.Button(self, text="SET", command=self.set_speed).grid(column=3, row=5, **pad)
         tk.Button(self, text="STOP (Esc)", fg="red", command=self.stop_tx).grid(column=6, row=5, **pad)
+        if self.keyer:
+            mode_frame = tk.Frame(self)
+            mode_frame.grid(column=4, row=5, columnspan=2, **pad)
+            for mode in Session.MODES:
+                tk.Radiobutton(mode_frame, text=mode.title(), variable=self.mode_var, value=mode,
+                               command=self.set_mode).pack(side="left")
 
         tk.Button(self, text="Log QSO", command=self.log_qso).grid(column=1, row=6, sticky="we", **pad)
 
@@ -150,6 +157,7 @@ class App(tk.Tk):
         self.bind("<Escape>", lambda e: self.stop_tx())
         if self.keyer:
             self.bind("<F6>", lambda e: self.send_dots())
+            self.bind("<F7>", lambda e: self.toggle_mode())
             self.bind("<Prior>", lambda e: self.tune_step(1))
             self.bind("<Next>", lambda e: self.tune_step(-1))
 
@@ -182,6 +190,14 @@ class App(tk.Tk):
 
     def send_dots(self):
         self.session.send_dots()
+
+    def set_mode(self):
+        if not self.session.set_mode(self.mode_var.get()):
+            self.mode_var.set(self.session.mode)
+
+    def toggle_mode(self):
+        self.mode_var.set("HELL" if self.session.mode == "CW" else "CW")
+        self.set_mode()
 
     def tune_step(self, direction):
         self.session.tune_step(direction, self.step_var.get())

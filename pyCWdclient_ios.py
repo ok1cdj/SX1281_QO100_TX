@@ -226,6 +226,11 @@ class MainView(ui.View):
                      (self.power_ctl, 5),
                      (button("DOTS", act(s.send_dots)), 2))
 
+            self.mode_ctl = ui.SegmentedControl(segments=[m.title() for m in Session.MODES],
+                                                action=self.set_mode)
+            self.mode_ctl.selected_index = 0
+            self.row(ROW_H, (label("Mode"), 1), (self.mode_ctl, 3), (label(""), 4))
+
         self.row(ROW_H,
                  (button("CQ", act(lambda: self.macro("cq"))), 1),
                  (button("RPT", act(lambda: self.macro("rpt"))), 1),
@@ -276,6 +281,7 @@ class MainView(ui.View):
         if self.keyer:
             commands += [
                 {"input": "d", "modifiers": "cmd", "title": "Dots"},
+                {"input": "h", "modifiers": "cmd", "title": "CW / Hell"},
                 {"input": "up", "modifiers": "cmd", "title": "Tune up"},
                 {"input": "down", "modifiers": "cmd", "title": "Tune down"},
             ]
@@ -290,6 +296,7 @@ class MainView(ui.View):
             "4": lambda: self.macro("de"),
             "l": self.log_qso,
             "d": self.session.send_dots,
+            "h": self.toggle_mode,
             "up": lambda: self.tune(1),
             "down": lambda: self.tune(-1),
         }
@@ -307,6 +314,11 @@ class MainView(ui.View):
 
     def send_free(self):
         self.session.send(self.free_field.text.strip().upper())
+
+    def toggle_mode(self):
+        mode = "HELL" if self.session.mode == "CW" else "CW"
+        if self.session.set_mode(mode):
+            self.mode_ctl.selected_index = Session.MODES.index(mode)
 
     def copy_call(self):
         call = self.call_field.text.strip().upper()
@@ -338,6 +350,10 @@ class MainView(ui.View):
     def set_power(self, sender):
         pos = sender.selected_index
         self.loop.post(lambda: self.session.set_power(pos))
+
+    def set_mode(self, sender):
+        mode = Session.MODES[sender.selected_index]
+        self.loop.post(lambda: self.session.set_mode(mode))
 
     def show_memories(self, sender):
         if not self.session.memories:

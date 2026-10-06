@@ -108,14 +108,14 @@ def adif_field(name, value):
     return f"<{name}:{len(value)}>{value}"
 
 
-def build_adif(call, locator, rst_sent, rst_rcvd, adif_cfg, when=None):
+def build_adif(call, locator, rst_sent, rst_rcvd, adif_cfg, when=None, mode="CW"):
     when = when or datetime.now(timezone.utc)
     fields = [
         ("BAND", adif_cfg["band"]),
         ("BAND_RX", adif_cfg["band_rx"]),
         ("CALL", call),
         ("GRIDSQUARE", locator),
-        ("MODE", "CW"),
+        ("MODE", mode),
         ("PROP_MODE", "SAT"),
         ("RST_RCVD", rst_rcvd),
         ("RST_SENT", rst_sent),
@@ -174,6 +174,12 @@ class KeyerWeb:
     def set_power(self, value):
         self._get("/", pwr=value)
         self.power = value
+
+    def hell_send(self, text):
+        """Send text once in Feld Hell; appended to the text the keyer is sending."""
+        response = self._get("/hell", cmd="send", txt=text).strip()
+        if response not in ("TX", "stopped"):
+            raise RuntimeError(f"Keyer answered {response!r}")
 
     def command(self, name, label):
         """Press a keyer form button, e.g. ("cmd_D", "Dots") or ("cmd_B", "Break")."""
@@ -313,6 +319,8 @@ class Session:
     TUNE_STEPS = [("1 step", 0), ("1 kHz", 1000), ("10 kHz", 10000), ("100 kHz", 100000)]
     # Ignore polled frequency this long after local tuning, so the display does not jump back
     TUNE_HOLD_S = 1.5
+    # TX modes; HELL (Feld Hell) is sent by the keyer web API, so it needs keyer_web
+    MODES = ["CW", "HELL"]
 
     def __init__(self, config, cw, post, call_later, keyer=None, memories_path=None, cloudlog_ok=False):
         self.config = config
@@ -329,6 +337,7 @@ class Session:
         self.pending_set = False
         self.last_power_set = 0.0
         self.running = False
+        self.mode = "CW"
 
         self.on_status = lambda text: None
         self.on_freq = lambda: None
@@ -363,8 +372,19 @@ class Session:
             rst=rst.strip(),
         )
 
+    def set_mode(self, mode):
+        if mode == "HELL" and not self.keyer:
+            self.set_status("Feld Hell needs keyer_web in config")
+            return False
+        self.mode = mode
+        self.set_status(f"Mode {mode}")
+        return True
+
     def send(self, text):
         if not text:
+            return
+        if self.mode == "HELL":
+            self.send_hell(text)
             return
         try:
             self.cw.send(text)
@@ -372,6 +392,17 @@ class Session:
         except OSError as e:
             log.exception("UDP send failed")
             self.set_status(f"Send failed: {e}")
+
+    def send_hell(self, text):
+        def on_done(_, error):
+            if error:
+                log.warning("Hell send failed: %s", error)
+                self.set_status(f"Hell send failed: {error}")
+            else:
+                self.set_status(f"Hell: {text}")
+        log.info("Sending Hell - %s", text)
+        # Space between messages, the keyer appends them while sending
+        self.worker.submit(lambda: self.keyer.hell_send(text + " "), on_done)
 
     def send_macro(self, name, call="", rst=""):
         self.send(self.macro(name, call, rst))
@@ -562,7 +593,8 @@ class Session:
         if not call:
             self.set_status("Enter a call before logging")
             return
-        adif = build_adif(call, locator.strip().upper(), rst_sent.strip(), rst_rcvd.strip(), self.adif_config())
+        adif = build_adif(call, locator.strip().upper(), rst_sent.strip(), rst_rcvd.strip(), self.adif_config(),
+                          mode=self.mode)
         log.info("LOG QSO\n%s", adif)
         cl = self.config["cloudlog"]
         if not cl["url"]:
