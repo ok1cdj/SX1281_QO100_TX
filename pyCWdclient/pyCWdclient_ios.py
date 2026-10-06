@@ -226,7 +226,7 @@ class MainView(ui.View):
                      (self.power_ctl, 5),
                      (button("DOTS", act(s.send_dots)), 2))
 
-            self.mode_ctl = ui.SegmentedControl(segments=[m.title() for m in Session.MODES],
+            self.mode_ctl = ui.SegmentedControl(segments=[Session.MODE_LABELS[m] for m in Session.MODES],
                                                 action=self.set_mode)
             self.mode_ctl.selected_index = 0
             self.row(ROW_H, (label("Mode"), 1), (self.mode_ctl, 3), (label(""), 4))

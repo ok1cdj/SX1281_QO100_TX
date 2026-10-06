@@ -329,6 +329,7 @@ class Session:
     TUNE_HOLD_S = 1.5
     # TX modes; HELL (Feld Hell) is sent by the keyer web API, so it needs keyer_web
     MODES = ["CW", "HELL"]
+    MODE_LABELS = {"CW": "CW", "HELL": "Hell"}
 
     def __init__(self, config, cw, post, call_later, keyer=None, memories_path=None, wavelog_ok=False):
         self.config = config

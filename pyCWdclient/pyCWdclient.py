@@ -103,10 +103,10 @@ class App(tk.Tk):
         tk.Button(self, text="STOP (Esc)", fg="red", command=self.stop_tx).grid(column=6, row=5, **pad)
         if self.keyer:
             mode_frame = tk.Frame(self)
-            mode_frame.grid(column=4, row=5, columnspan=2, **pad)
+            mode_frame.grid(column=2, row=6, sticky="w", **pad)
             for mode in Session.MODES:
-                tk.Radiobutton(mode_frame, text=mode.title(), variable=self.mode_var, value=mode,
-                               command=self.set_mode).pack(side="left")
+                tk.Radiobutton(mode_frame, text=Session.MODE_LABELS[mode], variable=self.mode_var, value=mode,
+                               command=self.set_mode, anchor="w").pack(side="left")
 
         tk.Button(self, text="Log QSO", command=self.log_qso).grid(column=1, row=6, sticky="we", **pad)
 

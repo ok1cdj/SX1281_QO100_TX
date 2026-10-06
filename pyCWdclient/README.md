@@ -88,6 +88,8 @@ STOP sends Break, which also stops Hell. QSOs logged in Hell mode get `MODE=HELL
 
 ### Receiving (Tk on Linux)
 
+![pyCWdclient receiving Feld Hell](../img/pyCWdclient-hell-rx.png)
+
 The *Feld Hell RX* panel decodes Feld Hell from audio, e.g. a WebSDR playing in the
 browser. It needs `numpy` and `parec` (PulseAudio / PipeWire); without them the panel is
 hidden. Audio is taken from `hell_rx.source`, by default `@DEFAULT_MONITOR@` = whatever plays
