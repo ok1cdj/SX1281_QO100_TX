@@ -51,7 +51,8 @@
 //#define Program_Version "v1.3"     // 2023-02-02 JU, Added support for Iambic-B keying. Based on request of Markus DL6YYM
 //#define Program_Version "v1.4"     // 2023-02-06 JU, fixing Iambic-B behaviour, ...
 //#define Program_Version "v1.5"     // 2023-02-10 JU, again fixing Iambic-B behaviour, PTT fix, added configurable Messages1 which can be played over HTML form
-#define Program_Version "v1.6"     // 2026-10-05 OK1CDJ, Wi-Fi keep-alive (no modem sleep, reconnect), OTA update via web
+//#define Program_Version "v1.6"     // 2026-10-05 OK1CDJ, Wi-Fi keep-alive (no modem sleep, reconnect), OTA update via web
+#define Program_Version "v1.7"     // 2026-10-06 OK1CDJ, Feld Hell beacon set from web, web layout for mobile
 
 
 #define NSS 5                                  //select pin on LoRa device
@@ -373,4 +374,12 @@ const Glyph glyphtab[] PROGMEM = {
   {'#', {0x0330, 0x0ffc, 0x0330, 0x0ffc, 0x0330, 0x0000, 0x0000}},
   {'$', {0x078c, 0x0ccc, 0x1ffe, 0x0ccc, 0x0c78, 0x0000, 0x0000}},
   {'/', {0x001c, 0x0070, 0x01c0, 0x0700, 0x1c00, 0x0000, 0x0000}},
+  {'-', {0x00c0, 0x00c0, 0x00c0, 0x00c0, 0x0000, 0x0000, 0x0000}},
+  {'=', {0x0330, 0x0330, 0x0330, 0x0330, 0x0330, 0x0000, 0x0000}},
+  {'+', {0x00c0, 0x00c0, 0x07f8, 0x00c0, 0x00c0, 0x0000, 0x0000}},
+  {':', {0x071c, 0x071c, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000}},
+  {';', {0x0003, 0x071e, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000}},
+  {',', {0x0003, 0x001e, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000}},
+  {'\'', {0x0e00, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000}},
+  {'@', {0x03f0, 0x0408, 0x05c8, 0x0548, 0x03d0, 0x0000, 0x0000}},
 } ;

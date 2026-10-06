@@ -3,7 +3,7 @@ QO-100 SAT CW Transmitter with OLED Display using 2.4 GHz LoRa module with TCXO 
 
 https://www.nicerf.com/products/detail/500mw-2-4ghz-lora-wireless-transceiver-module-lora1280f27-lora1281f27.html
 
-Only one DIGI mode possible - SLOW Hellschreiber - need bigger dish than 80cm - only beacon implemented yet 
+Only one DIGI mode possible - Feld Hell (122.5 Bd, receivable e.g. with fldigi) - need bigger dish than 80cm - beacon only
 
 *Maximal power output is 450mW. It is enought to work over satellite with 60cm DISH, but tested also with 35cm and helix feed.*
 
@@ -20,6 +20,8 @@ Only one DIGI mode possible - SLOW Hellschreiber - need bigger dish than 80cm - 
 - New: PTT output on ESP32 module pin-12. This is logic signal, one must add external NPN/MOSFET. Configurable delay.
 - Wi-Fi keep-alive: modem sleep off, automatic reconnect (fixes drop-outs with mesh APs such as TP-Link Deco)
 - Firmware and web files update over Wi-Fi (OTA) - see below
+- Feld Hell beacon - see below
+- Web interface usable on mobile phones
 
 ![alt text](https://raw.githubusercontent.com/ok1cdj/SX1281_QO100_TX/main/img/QO100-tx-purple.png)
 
@@ -56,6 +58,18 @@ KEYER_APIKEY=1111 pio run -e ota -t uploadfs --upload-port <keyer IP>
 
 There is no automatic rollback - a firmware that does not start needs a USB flash
 (hold BOOT, press EN).
+
+## Feld Hell beacon
+Standard Feld Hell (7x14 font, 245 pixels/s, 2.5 characters/s, on/off keying), decoded by the
+Feld Hell mode of fldigi. Text, number of repetitions (0 = until Stop) and pause between them
+are set on the web page and kept after restart; `%CALL%` in the text is replaced by MyCall.
+Start/Stop from the web page, from the menu (*Beacon FHELL*) or by HTTP:
+
+```sh
+curl "http://<keyer IP>/hell?apikey=<APIKEY>&cmd=start"   # cmd=stop, no cmd = status
+```
+
+Break (web, UDP) or the encoder push button stops the beacon. CW text is not sent while it runs.
 
 ## User interface
 ![alt text](https://raw.githubusercontent.com/ok1cdj/SX1281_QO100_TX/main/img/QO100-tx.png)
