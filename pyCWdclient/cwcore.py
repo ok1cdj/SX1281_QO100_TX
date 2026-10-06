@@ -256,31 +256,17 @@ def save_memories(path, indexes):
         json.dump([{"index": i} for i in indexes], f, indent=2)
 
 
-# Wavelog answers on /api/...; Cloudlog and Wavelog without URL rewriting on /index.php/api/...
-API_PREFIXES = ["/api", "/index.php/api"]
-api_prefix = API_PREFIXES[0]
-
-
 def test_wavelog(base_url):
     """
-    Check that the Wavelog URL answers and remember which API path works.
+    Check that we can make a request to the given Wavelog URL.
     """
-    global api_prefix
-    for prefix in API_PREFIXES:
-        try:
-            response = urllib.request.urlopen(f"{base_url}{prefix}/statistics", timeout=10)
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                continue
-            raise
-        if not 200 <= response.status < 300:
-            raise RuntimeError(f"Unexpected HTTP status {response.status}")
-        api_prefix = prefix
-        data = json.loads(response.read().decode())
-        if "Today" not in data:
-            log.warning("Unknown response from Wavelog %s. May not be connected correctly.", data)
-        return data
-    raise RuntimeError(f"No Wavelog API found at {base_url}")
+    response = urllib.request.urlopen(f"{base_url}/index.php/api/statistics", timeout=10)
+    if not 200 <= response.status < 300:
+        raise RuntimeError(f"Unexpected HTTP status {response.status}")
+    data = json.loads(response.read().decode())
+    if "Today" not in data:
+        log.warning("Unknown response from Wavelog %s. May not be connected correctly.", data)
+    return data
 
 
 def check_wavelog(config):
@@ -291,7 +277,7 @@ def check_wavelog(config):
         return False
     try:
         test_wavelog(url)
-        log.info("Successfully tested connection to Wavelog (%s)", api_prefix)
+        log.info("Successfully tested connection to Wavelog")
         return True
     except Exception:
         log.exception("Unable to connect to Wavelog")
@@ -305,7 +291,7 @@ def upload_to_wavelog(base_url, api_key, station_id, payload):
         "type": "adif",
         "string": payload,
     }
-    req = urllib.request.Request(f"{base_url}{api_prefix}/qso")
+    req = urllib.request.Request(f"{base_url}/index.php/api/qso")
     req.add_header("Content-Type", "application/json; charset=utf-8")
     try:
         response = urllib.request.urlopen(req, json.dumps(data).encode("utf-8"), timeout=10)
