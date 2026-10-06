@@ -26,6 +26,18 @@ Only one DIGI mode possible - Feld Hell (122.5 Bd, receivable e.g. with fldigi) 
 ![alt text](https://raw.githubusercontent.com/ok1cdj/SX1281_QO100_TX/main/img/QO100-tx-purple.png)
 
 
+## Python client (pyCWdclient)
+[`pyCWdclient/`](pyCWdclient/README.md) is a desktop (Tk) and iPad (Pythonista) client for the keyer:
+CW macros over UDP (cwdaemon protocol), Feld Hell TX through the web API, Feld Hell receiver
+(Linux, audio from an SDR), TX frequency and power control, frequency memories and QSO logging
+to Cloudlog.
+
+```sh
+cd pyCWdclient
+cp config.example.json config.json   # keyer IP, call, Cloudlog
+python3 pyCWdclient.py
+```
+
 ## Used libraries
 Adafruit GFX Library
 
