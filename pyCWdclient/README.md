@@ -1,7 +1,7 @@
 # pyCWdclient
 
 Tk GUI client for [cwdaemon](https://github.com/acerion/cwdaemon) compatible keyers (e.g. an ESP32 keyer)
-for CW and Feld Hell operation via QO-100. Sends CW macros over UDP and logs QSOs to [Cloudlog](https://github.com/magicbug/Cloudlog) as ADIF.
+for CW and Feld Hell operation via QO-100. Sends CW macros over UDP and logs QSOs to [Wavelog](https://github.com/wavelog/wavelog) as ADIF.
 
 Part of [SX1281_QO100_TX](https://github.com/ok1cdj/SX1281_QO100_TX) - the client for its keyer
 (CW and Feld Hell TX, Feld Hell RX, frequency and power control).
@@ -10,11 +10,15 @@ Part of [SX1281_QO100_TX](https://github.com/ok1cdj/SX1281_QO100_TX) - the clien
 
 ```sh
 pip install -r requirements.txt
-cp config.example.json config.json   # edit IP, station, macros, Cloudlog
+cp config.example.json config.json   # edit IP, station, macros, Wavelog
 python pyCWdclient.py
 ```
 
-Cloudlog credentials can also be given on the command line (they override the config):
+QSOs are uploaded to [Wavelog](https://github.com/wavelog/wavelog) (`wavelog` in the config: URL,
+API key with write rights, station profile ID). Cloudlog works too; an old `cloudlog` config key
+is still read.
+
+Wavelog credentials can also be given on the command line (they override the config):
 
 ```sh
 python pyCWdclient.py <url> <api_key> <station_id>
@@ -40,7 +44,7 @@ Placeholders: `{mycall}`, `{name}`, `{myloc}` (from `station`), `{call}`, `{rst}
 ## Pythonista (iPad / iPhone)
 
 `pyCWdclient_ios.py` is the same client with a touch UI for [Pythonista 3](http://omz-software.com/pythonista/).
-The logic (cwdaemon, keyer, tuning, memories, ADIF, Cloudlog) is shared in `cwcore.py`;
+The logic (cwdaemon, keyer, tuning, memories, ADIF, Wavelog) is shared in `cwcore.py`;
 `pyCWdclient.py` is the Tk frontend.
 
 1. Copy `cwcore.py`, `pyCWdclient_ios.py` and your `config.json` into one Pythonista folder

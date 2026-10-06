@@ -2,7 +2,7 @@
 QO100TX - CW Daemon Client core (no GUI).
 
 cwdaemon UDP client, QO-100 TX keyer web client, frequency/memory/power logic,
-ADIF and Cloudlog. Used by the Tk frontend (pyCWdclient.py) and the Pythonista
+ADIF and Wavelog. Used by the Tk frontend (pyCWdclient.py) and the Pythonista
 frontend (pyCWdclient_ios.py).
 """
 import copy
@@ -32,7 +32,8 @@ DEFAULT_CONFIG = {
         "tu": "TU 73 de {mycall}",
         "de": "de {mycall} {mycall}",
     },
-    "cloudlog": {"url": "", "api_key": "", "station_id": ""},
+    # Wavelog logbook (Cloudlog works too - same API); "cloudlog" in old configs is still read
+    "wavelog": {"url": "", "api_key": "", "station_id": ""},
     # Keyer web UI; if url is set, TX frequency is shown, tunable and logged.
     # correction_hz = real frequency (SDR/GPS) - frequency computed by the keyer
     "keyer_web": {"url": "http://192.168.1.200/", "apikey": "1111", "poll_s": 3, "correction_hz": 0},
@@ -74,10 +75,14 @@ def load_config(path):
         return copy.deepcopy(DEFAULT_CONFIG)
     with path.open(encoding="utf-8") as f:
         try:
-            config = merge(DEFAULT_CONFIG, json.load(f))
+            user = json.load(f)
         except json.JSONDecodeError as e:
             raise ConfigError(f"Invalid config {path}: {e.msg} at line {e.lineno}, column {e.colno}")
-    config["cloudlog"]["url"] = config["cloudlog"]["url"].rstrip("/")
+    if "cloudlog" in user and "wavelog" not in user:
+        log.warning("Config key 'cloudlog' is deprecated, rename it to 'wavelog'")
+        user["wavelog"] = user.pop("cloudlog")
+    config = merge(DEFAULT_CONFIG, user)
+    config["wavelog"]["url"] = config["wavelog"]["url"].rstrip("/")
     return config
 
 
@@ -251,53 +256,67 @@ def save_memories(path, indexes):
         json.dump([{"index": i} for i in indexes], f, indent=2)
 
 
-def test_cloudlog(base_url):
-    """
-    Check that we can make a request to the given cloudlog URL.
-    """
-    response = urllib.request.urlopen(f"{base_url}/index.php/api/statistics", timeout=10)
-    if not 200 <= response.status < 300:
-        raise RuntimeError(f"Unexpected HTTP status {response.status}")
-    data = json.loads(response.read().decode())
-    if "Today" not in data:
-        log.warning("Unknown response from Cloudlog %s. May not be connected correctly.", data)
-    return data
+# Wavelog answers on /api/...; Cloudlog and Wavelog without URL rewriting on /index.php/api/...
+API_PREFIXES = ["/api", "/index.php/api"]
+api_prefix = API_PREFIXES[0]
 
 
-def check_cloudlog(config):
-    """True if Cloudlog is configured and answers."""
-    url = config["cloudlog"]["url"]
+def test_wavelog(base_url):
+    """
+    Check that the Wavelog URL answers and remember which API path works.
+    """
+    global api_prefix
+    for prefix in API_PREFIXES:
+        try:
+            response = urllib.request.urlopen(f"{base_url}{prefix}/statistics", timeout=10)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                continue
+            raise
+        if not 200 <= response.status < 300:
+            raise RuntimeError(f"Unexpected HTTP status {response.status}")
+        api_prefix = prefix
+        data = json.loads(response.read().decode())
+        if "Today" not in data:
+            log.warning("Unknown response from Wavelog %s. May not be connected correctly.", data)
+        return data
+    raise RuntimeError(f"No Wavelog API found at {base_url}")
+
+
+def check_wavelog(config):
+    """True if Wavelog is configured and answers."""
+    url = config["wavelog"]["url"]
     if not url:
-        log.warning("Cloudlog URL not configured")
+        log.warning("Wavelog URL not configured")
         return False
     try:
-        test_cloudlog(url)
-        log.info("Successfully tested connection to Cloudlog")
+        test_wavelog(url)
+        log.info("Successfully tested connection to Wavelog (%s)", api_prefix)
         return True
     except Exception:
-        log.exception("Unable to connect to Cloudlog")
+        log.exception("Unable to connect to Wavelog")
         return False
 
 
-def upload_to_cloudlog(base_url, api_key, station_id, payload):
+def upload_to_wavelog(base_url, api_key, station_id, payload):
     data = {
         "key": api_key,
         "station_profile_id": station_id,
         "type": "adif",
         "string": payload,
     }
-    req = urllib.request.Request(f"{base_url}/index.php/api/qso")
+    req = urllib.request.Request(f"{base_url}{api_prefix}/qso")
     req.add_header("Content-Type", "application/json; charset=utf-8")
     try:
         response = urllib.request.urlopen(req, json.dumps(data).encode("utf-8"), timeout=10)
-        log.info("Sent QSO to cloudlog at %s, got response %s", base_url, response.read().decode())
+        log.info("Sent QSO to Wavelog at %s, got response %s", base_url, response.read().decode())
         return True
     except Exception:
-        log.exception("Failed to send ADIF to cloudlog")
+        log.exception("Failed to send ADIF to Wavelog")
         return False
 
 
-def make_session(config, post, call_later, memories_path=None, cloudlog_ok=False):
+def make_session(config, post, call_later, memories_path=None, wavelog_ok=False):
     """Create cwdaemon and keyer clients from config and wrap them in a Session."""
     udp = config["udp"]
     log.info("UDP target %s:%s", udp["host"], udp["port"])
@@ -306,7 +325,7 @@ def make_session(config, post, call_later, memories_path=None, cloudlog_ok=False
     keyer = None
     if keyer_cfg["url"]:
         keyer = KeyerWeb(keyer_cfg["url"], keyer_cfg["apikey"], keyer_cfg["correction_hz"])
-    return Session(config, cw, post, call_later, keyer, memories_path, cloudlog_ok)
+    return Session(config, cw, post, call_later, keyer, memories_path, wavelog_ok)
 
 
 class Session:
@@ -325,7 +344,7 @@ class Session:
     # TX modes; HELL (Feld Hell) is sent by the keyer web API, so it needs keyer_web
     MODES = ["CW", "HELL"]
 
-    def __init__(self, config, cw, post, call_later, keyer=None, memories_path=None, cloudlog_ok=False):
+    def __init__(self, config, cw, post, call_later, keyer=None, memories_path=None, wavelog_ok=False):
         self.config = config
         self.cw = cw
         self.post = post
@@ -333,7 +352,7 @@ class Session:
         self.keyer = keyer
         self.memories_path = memories_path
         self.memories = load_memories(memories_path) if memories_path else []
-        self.cloudlog_ok = cloudlog_ok
+        self.wavelog_ok = wavelog_ok
 
         self.freq_index = None
         self.last_tune = 0.0
@@ -352,8 +371,8 @@ class Session:
     def start(self):
         self.running = True
         self.cw.set_speed(self.config["speed_wpm"])
-        if not self.cloudlog_ok:
-            self.set_status("Cloudlog not available - QSOs will not be logged")
+        if not self.wavelog_ok:
+            self.set_status("Wavelog not available - QSOs will not be logged")
         if self.keyer:
             self.poll_freq()
 
@@ -591,7 +610,7 @@ class Session:
         return adif_cfg
 
     def log_qso(self, call, locator, rst_sent, rst_rcvd, on_logged):
-        """Upload the QSO to Cloudlog in the background; on_logged() runs on success."""
+        """Upload the QSO to Wavelog in the background; on_logged() runs on success."""
         call = call.strip().upper()
         if not call:
             self.set_status("Enter a call before logging")
@@ -599,9 +618,9 @@ class Session:
         adif = build_adif(call, locator.strip().upper(), rst_sent.strip(), rst_rcvd.strip(), self.adif_config(),
                           mode=self.mode)
         log.info("LOG QSO\n%s", adif)
-        cl = self.config["cloudlog"]
+        cl = self.config["wavelog"]
         if not cl["url"]:
-            self.set_status("Cloudlog URL not configured")
+            self.set_status("Wavelog URL not configured")
             return
         self.set_status(f"Logging {call}...")
 
@@ -613,6 +632,6 @@ class Session:
                 self.set_status(f"Logging {call} failed - see console")
 
         def upload():
-            ok = upload_to_cloudlog(cl["url"], cl["api_key"], cl["station_id"], adif)
+            ok = upload_to_wavelog(cl["url"], cl["api_key"], cl["station_id"], adif)
             self.post(functools.partial(done, ok))
         threading.Thread(target=upload, daemon=True).start()

@@ -15,7 +15,7 @@
     "tu": "TU 73 de {mycall}",
     "de": "de {mycall} {mycall}"
   },
-  "cloudlog": {
+  "wavelog": {
     "url": "",
     "api_key": "",
     "station_id": ""

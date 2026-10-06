@@ -23,7 +23,7 @@ Modes: CW and Feld Hell (122.5 Bd, decoded e.g. by fldigi). Feld Hell is sent as
 - Firmware and web files update over Wi-Fi (OTA) - see below
 - Feld Hell: beacon set from the web page, text sent from the client or over HTTP - see below
 - Python client [pyCWdclient](pyCWdclient/README.md) for desktop and iPad: CW and Feld Hell TX, Feld Hell RX,
-  frequency and power control, QSO logging to Cloudlog
+  frequency and power control, QSO logging to Wavelog
 - Web interface usable on mobile phones
 
 ![alt text](https://raw.githubusercontent.com/ok1cdj/SX1281_QO100_TX/main/img/QO100-tx-purple.png)
@@ -33,11 +33,11 @@ Modes: CW and Feld Hell (122.5 Bd, decoded e.g. by fldigi). Feld Hell is sent as
 [`pyCWdclient/`](pyCWdclient/README.md) is a desktop (Tk) and iPad (Pythonista) client for the keyer:
 CW macros over UDP (cwdaemon protocol), Feld Hell TX through the web API, Feld Hell receiver
 (Linux, audio from an SDR), TX frequency and power control, frequency memories and QSO logging
-to Cloudlog.
+to Wavelog.
 
 ```sh
 cd pyCWdclient
-cp config.example.json config.json   # keyer IP, call, Cloudlog
+cp config.example.json config.json   # keyer IP, call, Wavelog
 python3 pyCWdclient.py
 ```
 

@@ -2,7 +2,7 @@
 QO100TX - CW Daemon Client (Tk GUI).
 
 Sends CW macros to a cwdaemon-compatible keyer over UDP and logs QSOs
-to Cloudlog as ADIF. The logic lives in cwcore.py.
+to Wavelog as ADIF. The logic lives in cwcore.py.
 """
 import argparse
 import logging
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pyperclip
 
-from cwcore import ConfigError, Session, check_cloudlog, load_config, make_session
+from cwcore import ConfigError, Session, check_wavelog, load_config, make_session
 
 try:
     import hellrx
@@ -25,11 +25,11 @@ log = logging.getLogger("pyCWdclient")
 
 
 class App(tk.Tk):
-    def __init__(self, config, memories_path=None, cloudlog_ok=False):
+    def __init__(self, config, memories_path=None, wavelog_ok=False):
         super().__init__()
         # Results from worker threads, handed over to the Tk thread by _dispatch()
         self.results = queue.Queue()
-        self.session = make_session(config, self.results.put, self.call_later, memories_path, cloudlog_ok)
+        self.session = make_session(config, self.results.put, self.call_later, memories_path, wavelog_ok)
         self.keyer = self.session.keyer
 
         self.title("QO100TX - CW Daemon Client")
@@ -340,9 +340,9 @@ class App(tk.Tk):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("url", nargs="?", help="URL for CloudLog (overrides config).")
-    parser.add_argument("api_key", nargs="?", help="CloudLog API key (overrides config).")
-    parser.add_argument("station_id", nargs="?", help="CloudLog station ID (overrides config).")
+    parser.add_argument("url", nargs="?", help="URL for Wavelog (overrides config).")
+    parser.add_argument("api_key", nargs="?", help="Wavelog API key (overrides config).")
+    parser.add_argument("station_id", nargs="?", help="Wavelog station ID (overrides config).")
     parser.add_argument("--config", default=Path(__file__).with_name("config.json"),
                         help="Path to JSON config file.")
     parser.add_argument("--verbose", action="store_true", help="Output debugging information.")
@@ -359,11 +359,11 @@ def main():
         sys.exit(str(e))
     for key in ("url", "api_key", "station_id"):
         if getattr(args, key):
-            config["cloudlog"][key] = getattr(args, key).rstrip("/") if key == "url" else getattr(args, key)
+            config["wavelog"][key] = getattr(args, key).rstrip("/") if key == "url" else getattr(args, key)
 
-    cloudlog_ok = check_cloudlog(config)
+    wavelog_ok = check_wavelog(config)
     memories_path = Path(args.config).with_name("memories.json")
-    App(config, memories_path, cloudlog_ok).mainloop()
+    App(config, memories_path, wavelog_ok).mainloop()
 
 
 if __name__ == "__main__":

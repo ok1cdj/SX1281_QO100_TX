@@ -17,7 +17,7 @@ import clipboard
 import console
 import ui
 
-from cwcore import ConfigError, Session, check_cloudlog, load_config, make_session
+from cwcore import ConfigError, Session, check_wavelog, load_config, make_session
 
 log = logging.getLogger("pyCWdclient")
 
@@ -155,9 +155,9 @@ class MainView(ui.View):
         self.background_color = "white"
         self.config = config
         self.loop = Loop()
-        # cloudlog_ok=True: the check runs in the background and reports a failure itself
+        # wavelog_ok=True: the check runs in the background and reports a failure itself
         self.session = make_session(config, self.loop.post, self.loop.call_later, memories_path,
-                                    cloudlog_ok=True)
+                                    wavelog_ok=True)
         self.keyer = self.session.keyer
 
         self.scroll = ui.ScrollView(flex="WH")
@@ -169,7 +169,7 @@ class MainView(ui.View):
         self.session.on_freq = self.update_freq
         self.session.on_power = self.update_power
         self.loop.post(self.session.start)
-        threading.Thread(target=self._check_cloudlog, daemon=True).start()
+        threading.Thread(target=self._check_wavelog, daemon=True).start()
 
     # --- layout ---
 
@@ -377,9 +377,9 @@ class MainView(ui.View):
             self.power_ctl.segments = labels
         self.power_ctl.selected_index = self.session.power_position()
 
-    def _check_cloudlog(self):
-        if not check_cloudlog(self.config):
-            self.loop.post(lambda: self.set_status("Cloudlog not available - QSOs will not be logged"))
+    def _check_wavelog(self):
+        if not check_wavelog(self.config):
+            self.loop.post(lambda: self.set_status("Wavelog not available - QSOs will not be logged"))
 
     def will_close(self):
         self.session.running = False
