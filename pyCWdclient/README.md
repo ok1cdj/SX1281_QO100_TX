@@ -1,7 +1,7 @@
 # pyCWdclient
 
 Tk GUI client for [cwdaemon](https://github.com/acerion/cwdaemon) compatible keyers (e.g. an ESP32 keyer)
-for CW operation via QO-100. Sends CW macros over UDP and logs QSOs to [Cloudlog](https://github.com/magicbug/Cloudlog) as ADIF.
+for CW and Feld Hell operation via QO-100. Sends CW macros over UDP and logs QSOs to [Cloudlog](https://github.com/magicbug/Cloudlog) as ADIF.
 
 Part of [SX1281_QO100_TX](https://github.com/ok1cdj/SX1281_QO100_TX) - the client for its keyer
 (CW and Feld Hell TX, Feld Hell RX, frequency and power control).
