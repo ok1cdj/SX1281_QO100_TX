@@ -26,6 +26,14 @@
     "poll_s": 3,
     "correction_hz": 0
   },
+  "websdr": {
+    "url": "https://eshail.batc.org.uk/nb/m.html",
+    "type": "websdr",
+    "mode": "cw",
+    "follow": true,
+    "span_khz": 10,
+    "height": 420
+  },
   "adif": {
     "band": "13cm",
     "band_rx": "3cm",

@@ -17,7 +17,7 @@ import clipboard
 import console
 import ui
 
-from cwcore import ConfigError, Session, check_wavelog, load_config, make_session
+from cwcore import ConfigError, Session, WebSdrTuner, check_wavelog, load_config, make_session
 
 log = logging.getLogger("pyCWdclient")
 
@@ -26,6 +26,7 @@ FREQ_H = 64
 PAD = 6
 STOP_COLOR = "#d32f2f"
 SPEED_MIN, SPEED_MAX = 10, 40
+SDR_MAX_FRACTION = 0.55          # the SDR takes at most this part of the screen height
 
 
 class Loop:
@@ -163,6 +164,10 @@ class MainView(ui.View):
         self.scroll = ui.ScrollView(flex="WH")
         self.add_subview(self.scroll)
         self.rows = []
+        # Web SDR under the controls while the SDR button is on
+        self.sdr = None
+        self.sdr_loaded = False
+        self.sdr_tuner = WebSdrTuner(config["websdr"]) if config["websdr"]["url"] else None
         self._build()
 
         self.session.on_status = self.set_status
@@ -180,7 +185,12 @@ class MainView(ui.View):
         self.rows.append((height, items))
 
     def layout(self):
-        self.scroll.frame = self.bounds
+        if self.sdr:
+            sdr_h = min(self.config["websdr"]["height"], self.height * SDR_MAX_FRACTION)
+            self.scroll.frame = (0, 0, self.width, self.height - sdr_h)
+            self.sdr.frame = (0, self.height - sdr_h, self.width, sdr_h)
+        else:
+            self.scroll.frame = self.bounds
         width = self.width - 2 * PAD
         y = PAD
         for height, items in self.rows:
@@ -229,7 +239,10 @@ class MainView(ui.View):
             self.mode_ctl = ui.SegmentedControl(segments=[Session.MODE_LABELS[m] for m in Session.MODES],
                                                 action=self.set_mode)
             self.mode_ctl.selected_index = 0
-            self.row(ROW_H, (label("Mode"), 1), (self.mode_ctl, 3), (label(""), 4))
+            cal = button("Cal", self.act(self.calibrate)) if self.sdr_tuner and self.sdr_tuner.calibrates() else label("")
+            self.row(ROW_H, (label("Mode"), 1), (self.mode_ctl, 3), (cal, 2), (self.sdr_button(), 2))
+        elif self.sdr_tuner:
+            self.row(ROW_H, (label(""), 6), (self.sdr_button(), 2))
 
         self.row(ROW_H,
                  (button("CQ", act(lambda: self.macro("cq"))), 1),
@@ -266,6 +279,54 @@ class MainView(ui.View):
         self.status_label = label("", 15)
         self.status_label.number_of_lines = 2
         self.row(ROW_H, (self.status_label, 1))
+
+    def sdr_button(self):
+        if not self.sdr_tuner:
+            return label("")
+        return button("SDR", self.toggle_sdr)
+
+    def toggle_sdr(self, _sender):
+        if self.sdr is None:
+            self.sdr_loaded = False
+            self.sdr = ui.WebView()
+            self.sdr.delegate = self
+            self.add_subview(self.sdr)
+            # Audio starts after the first tap into the page (WebAudio needs a user gesture on iOS)
+            self.sdr.load_url(self.sdr_tuner.url(self.session.rx_hz()))
+        else:
+            # Removing the page also stops its audio
+            self.remove_subview(self.sdr)
+            self.sdr = None
+        self.layout()
+
+    def calibrate(self):
+        """Loop thread. Transmit (DOTS), tune the SDR by hand onto your signal, then Cal."""
+        sdr = self.sdr
+        if not (sdr and self.sdr_loaded):
+            self.set_status("Cal: open SDR, send DOTS, tune the SDR onto your signal, Cal")
+            return
+        value = sdr.eval_js(f"String({self.sdr_tuner.read_js()})")
+        try:
+            sdr_hz = float(value)
+        except (TypeError, ValueError):
+            self.set_status(f"Cal: cannot read the SDR frequency ({value!r})")
+            return
+        diff = self.session.calibration_diff(sdr_hz)
+        if diff is None:
+            return
+        try:
+            console.alert("Calibrate", f"Your signal on the SDR is {diff:+d} Hz from the computed RX. "
+                          f"Correct the TX frequency by {diff:+d} Hz?", "Correct")
+        except KeyboardInterrupt:      # Cancel
+            return
+        self.session.apply_calibration(diff)
+
+    def webview_did_finish_load(self, webview):
+        # Scripts sent before the page has loaded are lost, so the first tuning waits for this
+        if webview is self.sdr and not self.sdr_loaded:
+            self.sdr_loaded = True
+            if self.keyer:
+                self.loop.post(self.update_freq)
 
     # --- hardware keyboard ---
 
@@ -370,6 +431,11 @@ class MainView(ui.View):
     def update_freq(self):
         self.freq_label.text = self.session.freq_text()
         self.rx_label.text = self.session.rx_text()
+        sdr = self.sdr       # the UI thread may remove it meanwhile
+        if sdr and self.sdr_loaded:
+            js = self.sdr_tuner.tune_js(self.session.rx_hz())
+            if js:
+                sdr.eval_js(js)
 
     def update_power(self):
         labels = self.session.power_labels()

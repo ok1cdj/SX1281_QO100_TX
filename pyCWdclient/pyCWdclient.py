@@ -9,12 +9,13 @@ import logging
 import queue
 import sys
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from pathlib import Path
 
 import pyperclip
 
-from cwcore import ConfigError, Session, check_wavelog, load_config, make_session
+from cwcore import ConfigError, Session, WebSdrTuner, check_wavelog, load_config, make_session
+import websdr
 
 try:
     import hellrx
@@ -57,8 +58,7 @@ class App(tk.Tk):
         self.session.on_freq = self.update_freq_display
         self.session.on_power = self.update_power_display
         self.session.on_memories = self.refresh_memories
-        if self.hell_rx:
-            self.protocol("WM_DELETE_WINDOW", self.close)
+        self.protocol("WM_DELETE_WINDOW", self.close)
         self._dispatch()
         self.session.start()
 
@@ -109,6 +109,17 @@ class App(tk.Tk):
                                command=self.set_mode, anchor="w").pack(side="left")
 
         tk.Button(self, text="Log QSO", command=self.log_qso).grid(column=1, row=6, sticky="we", **pad)
+        self.sdr = None
+        browser = websdr.find_browser()
+        if self.session.config["websdr"]["url"] and browser:
+            self.sdr_tuner = WebSdrTuner(self.session.config["websdr"])
+            self.sdr = websdr.WebSdrWindow(browser, lambda text: self.results.put(lambda: self.status_var.set(text)))
+            self.sdr_move_job = None
+            tk.Button(self, text="WebSDR", command=self.toggle_websdr).grid(column=6, row=6, sticky="we", **pad)
+            if self.keyer and self.sdr_tuner.calibrates():
+                tk.Button(self, text="Calibrate", command=self.calibrate).grid(column=7, row=6, columnspan=2,
+                                                                                sticky="we", **pad)
+            self.bind("<Configure>", self._websdr_follow_window)
 
         if self.keyer:
             self._build_freq_widgets().grid(column=1, row=7, columnspan=8, sticky="we", **pad)
@@ -202,8 +213,51 @@ class App(tk.Tk):
             pass
 
     def close(self):
-        self.hell_rx.stop()
+        if self.hell_rx:
+            self.hell_rx.stop()
+        if self.sdr:
+            self.sdr.close()
         self.destroy()
+
+    # --- WebSDR: browser window docked under this one ---
+
+    def _websdr_bounds(self):
+        border = self.winfo_rootx() - self.winfo_x()
+        top = self.winfo_rooty() + self.winfo_height() + border
+        return (self.winfo_x(), top, self.winfo_width() + 2 * border, self.session.config["websdr"]["height"])
+
+    def toggle_websdr(self):
+        if self.sdr.is_open():
+            self.sdr.close()
+        else:
+            self.sdr.open(self.sdr_tuner.url(self.session.rx_hz()), self._websdr_bounds())
+
+    def calibrate(self):
+        """Transmit (DOTS), tune the SDR by hand onto your signal, then Calibrate."""
+        if not self.sdr.is_open():
+            self.status_var.set("Calibrate: open WebSDR, send DOTS, tune the SDR onto your signal, Calibrate")
+            return
+        self.sdr.evaluate(self.sdr_tuner.read_js(),
+                          lambda value, error: self.results.put(lambda: self._calibrate(value, error)))
+
+    def _calibrate(self, sdr_hz, error):
+        if error or not isinstance(sdr_hz, (int, float)):
+            self.status_var.set(f"Calibrate: cannot read the SDR frequency ({error or sdr_hz})")
+            return
+        diff = self.session.calibration_diff(sdr_hz)
+        if diff is None:
+            return
+        if messagebox.askyesno("Calibrate", f"Your signal on the SDR is {diff:+d} Hz from the computed RX.\n"
+                                            f"Correct the TX frequency by {diff:+d} Hz?", parent=self):
+            self.session.apply_calibration(diff)
+
+    def _websdr_follow_window(self, event):
+        # Configure also comes from child widgets (bindtags); only the toplevel matters
+        if event.widget is not self or not self.sdr.is_open():
+            return
+        if self.sdr_move_job:
+            self.after_cancel(self.sdr_move_job)
+        self.sdr_move_job = self.after(150, lambda: self.sdr.move(self._websdr_bounds()))
 
     def _build_freq_widgets(self):
         pad = {"padx": 2, "pady": 2}
@@ -304,6 +358,10 @@ class App(tk.Tk):
     def update_freq_display(self):
         self.freq_var.set(self.session.freq_text())
         self.freq_rx_var.set(self.session.rx_text())
+        if self.sdr and self.sdr.is_open():
+            js = self.sdr_tuner.tune_js(self.session.rx_hz())
+            if js:
+                self.sdr.run_js(js)
 
     def update_power_display(self):
         self.power_box["values"] = self.session.power_labels()

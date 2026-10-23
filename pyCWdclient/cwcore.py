@@ -36,10 +36,17 @@ DEFAULT_CONFIG = {
     "wavelog": {"url": "", "api_key": "", "station_id": ""},
     # Keyer web UI; if url is set, TX frequency is shown, tunable and logged.
     # correction_hz = real frequency (SDR/GPS) - frequency computed by the keyer
+    # (calibration.json next to the config, written by Calibrate, takes precedence)
     "keyer_web": {"url": "http://192.168.1.200/", "apikey": "1111", "poll_s": 3, "correction_hz": 0},
     # Feld Hell receiver (Tk GUI on Linux): PulseAudio source for parec;
     # @DEFAULT_MONITOR@ = what plays in the default output (SDR in the headphones)
     "hell_rx": {"source": "@DEFAULT_MONITOR@", "tone_hz": 1000},
+    # Web SDR shown under the controls; type "websdr" (PA3FWM, e.g. BATC; .../m.html = its
+    # mobile page) or "openwebrx".
+    # follow = retune the SDR to the RX frequency when the keyer is tuned; url "" = off
+    # span_khz = zoom the waterfall to about this width around it (0 = leave the zoom alone)
+    "websdr": {"url": "https://eshail.batc.org.uk/nb/m.html", "type": "websdr", "mode": "cw",
+               "follow": True, "span_khz": 10, "height": 420},
     "adif": {
         "band": "13cm",
         "band_rx": "3cm",
@@ -83,7 +90,161 @@ def load_config(path):
         user["wavelog"] = user.pop("cloudlog")
     config = merge(DEFAULT_CONFIG, user)
     config["wavelog"]["url"] = config["wavelog"]["url"].rstrip("/")
+    if config["websdr"]["type"] not in WEB_SDR_TYPES:
+        raise ConfigError(f"websdr.type must be one of {', '.join(WEB_SDR_TYPES)}")
     return config
+
+
+def when_ready(condition, body, prefer="true", prefer_s=10):
+    """
+    JS that runs body once condition is true; retunes may arrive while the page still loads.
+    If prefer is given, it also waits up to prefer_s seconds for that.
+    """
+    tries = round(prefer_s / 0.3)
+    return (f"(function run(n) {{ if (!({condition}) || (!({prefer}) && n < {tries})) "
+            f"{{ setTimeout(function () {{ run(n + 1); }}, 300); return; }} {body} }})(0);")
+
+
+class PaWebSdr:
+    """
+    PA3FWM WebSDR (e.g. BATC QO-100 NB): ?tune=<kHz><mode>, setfreqif() in the page.
+    When the audio starts, the page retunes to its own frequency and in CW ends up 750 Hz
+    low, so it is tuned again after that (allloadeddone), or after 10 s if audio does not start.
+    Zoom: the waterfall is 1024 px of samplerate / 2^zoom kHz; wfset_freq() also centres it.
+    """
+
+    sets_mode_in_url = True
+
+    @staticmethod
+    def url(base, hz, mode):
+        return f"{base}?tune={hz / 1e3:.3f}{mode}" if hz else base
+
+    # Frequency shown in the page (in CW the carrier, the passband is offset), in Hz
+    read_js = "nominalfreq() * 1000"
+    calibrates = True
+
+    @staticmethod
+    def tune_js(hz, mode=None, span_khz=0):
+        khz = f"{hz / 1e3:.3f}"
+        body = f"setfreqif('{khz}');"
+        if span_khz:
+            body += (f" var e = bi[band]; var z = Math.round(Math.log2(e.samplerate / {span_khz})); "
+                     f"wfset_freq(band, Math.min(Math.max(z, 0), e.maxzoom), {khz});")
+        return when_ready("window.bi && window.waterfallapplet && waterfallapplet[band2id(band)]", body,
+                          prefer="window.allloadeddone")
+
+
+class PaWebSdrMobile:
+    """
+    PA3FWM WebSDR mobile page (m.html): no URL parameters, so the mode is set with the
+    first retune; freqsubmit() takes the frequency as shown (in CW the page shifts it).
+    The first tuning waits until the waterfall has started (the page sets zoom 1 then);
+    before that the waterfall start tunes back to the page's default frequency.
+    Zoom: bandinfo[band].zoom, kept by the page and centred on every retune.
+    """
+
+    sets_mode_in_url = False
+    read_js = PaWebSdr.read_js
+    calibrates = True
+
+    @staticmethod
+    def url(base, hz, mode):
+        return base
+
+    @staticmethod
+    def tune_js(hz, mode=None, span_khz=0):
+        body = ""
+        condition = "document.freqform && window.freqsubmit && bandinfo[band].zoom > 0"
+        if mode:
+            body += (f"var m = document.getElementById('modesel'); m.value = {json.dumps(mode.upper())}; "
+                     "setmode_sel(m); ")
+        if span_khz:
+            body += ("var e = bandinfo[band]; "
+                     f"var z = Math.round(Math.log2(e.samplerate * waterfallapplet[0].width / 1024 / {span_khz})); "
+                     "e.zoom = Math.min(Math.max(z, 0), e.maxzoom); ")
+        body += f"document.freqform.frequency.value = '{hz / 1e3:.3f}'; freqsubmit(document.freqform);"
+        return when_ready(condition, body)
+
+
+class OpenWebRx:
+    """
+    OpenWebRX: #freq=<Hz>,mod=<mode>; the page retunes on hashchange (within the current
+    profile). A hash without mod resets the mode, so a retune only replaces freq in the hash
+    the page keeps up to date. Zoom: zoom_set() centres on the receiver. Older versions have
+    a zoom_levels list of zoom factors, newer ones logarithmic levels up to the maximum.
+    Not used for calibration: unlike BATC, its receiver is not known to be GPS locked.
+    """
+
+    sets_mode_in_url = True
+    read_js = ("(function () { var d = $('#openwebrx-panel-receiver').demodulatorPanel(); "
+               "return d.getDemodulator().get_offset_frequency() + d.center_freq; })()")
+    calibrates = False
+
+    @staticmethod
+    def url(base, hz, mode):
+        return f"{base}#freq={hz:.0f},mod={mode}" if hz else base
+
+    @staticmethod
+    def tune_js(hz, mode=None, span_khz=0):
+        js = (f"(function () {{ var h = window.location.hash.substring(1); "
+              f"window.location.hash = /freq=\\d+/.test(h) ? h.replace(/freq=\\d+/, 'freq={hz:.0f}') : 'freq={hz:.0f}'; }})();")
+        if not span_khz:
+            return js
+        # hashchange is handled after this script, so zoom a moment later
+        return js + " setTimeout(function () { " + when_ready(
+            "typeof zoom_set == 'function' && typeof bandwidth != 'undefined' && bandwidth",
+            f"var want = bandwidth / {span_khz * 1e3:.0f}; "
+            "if (typeof zoom_levels != 'undefined' && zoom_levels.length) { "
+            "var best = 0; for (var i = 1; i < zoom_levels.length; i++) "
+            "if (Math.abs(Math.log(zoom_levels[i] / want)) < Math.abs(Math.log(zoom_levels[best] / want))) best = i; "
+            "zoom_set(best); } else { "
+            "var maxc = get_zoom_coeff_from_hps(zoom_max_level_hps); want = Math.min(Math.max(want, 1), maxc); "
+            "zoom_set(Math.log(want) / Math.log(maxc) * zoom_levels_count); }") + " }, 200);"
+
+
+WEB_SDR_TYPES = {"websdr": PaWebSdr, "openwebrx": OpenWebRx}
+
+
+class WebSdrTuner:
+    """
+    Builds the SDR URL and the JS that retunes it, once per frequency change.
+
+    The mode is only set when the page opens (by the URL, or by the first retune for pages
+    without URL parameters); later retunes keep whatever mode the user picked in the page.
+    With span_khz the waterfall is zoomed to about that width around the frequency.
+    """
+
+    def __init__(self, websdr_cfg):
+        self.cfg = websdr_cfg
+        self.kind = WEB_SDR_TYPES[websdr_cfg["type"]]
+        if self.kind is PaWebSdr and websdr_cfg["url"].endswith("m.html"):
+            self.kind = PaWebSdrMobile
+        self.last_hz = None
+        self.first = False
+
+    def url(self, hz):
+        """URL to open the page with; resets what was sent to the page."""
+        url = self.kind.url(self.cfg["url"], hz, self.cfg["mode"])
+        # The page is tuned once more when loaded: the URL cannot do it all (mode, zoom, BATC CW)
+        self.first = True
+        self.last_hz = None
+        return url
+
+    def tune_js(self, hz):
+        """JS to run in the page, or None if nothing changed or following is off."""
+        if hz is None or hz == self.last_hz or not (self.cfg["follow"] or self.first):
+            return None
+        self.last_hz = hz
+        mode = self.cfg["mode"] if self.first and not self.kind.sets_mode_in_url else None
+        self.first = False
+        return self.kind.tune_js(hz, mode, self.cfg["span_khz"])
+
+    def read_js(self):
+        """JS expression for the frequency the page is tuned to, in Hz."""
+        return self.kind.read_js
+
+    def calibrates(self):
+        return self.kind.calibrates
 
 
 class CwDaemon:
@@ -256,6 +417,24 @@ def save_memories(path, indexes):
         json.dump([{"index": i} for i in indexes], f, indent=2)
 
 
+def load_calibration(path):
+    """correction_hz saved by the SDR calibration, or None."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return int(json.load(f)["correction_hz"])
+    except FileNotFoundError:
+        return None
+    except (ValueError, KeyError, TypeError):
+        log.exception("Invalid calibration file %s", path)
+        return None
+
+
+def save_calibration(path, correction_hz):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"correction_hz": correction_hz,
+                   "date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}, f, indent=2)
+
+
 def test_wavelog(base_url):
     """
     Check that we can make a request to the given Wavelog URL.
@@ -309,9 +488,17 @@ def make_session(config, post, call_later, memories_path=None, wavelog_ok=False)
     cw = CwDaemon(udp["host"], udp["port"])
     keyer_cfg = config["keyer_web"]
     keyer = None
+    calibration_path = Path(memories_path).with_name("calibration.json") if memories_path else None
     if keyer_cfg["url"]:
-        keyer = KeyerWeb(keyer_cfg["url"], keyer_cfg["apikey"], keyer_cfg["correction_hz"])
-    return Session(config, cw, post, call_later, keyer, memories_path, wavelog_ok)
+        correction_hz = keyer_cfg["correction_hz"]
+        calibrated = load_calibration(calibration_path) if calibration_path else None
+        if calibrated is not None:
+            log.info("Frequency correction %+d Hz from %s (config: %+d Hz)", calibrated, calibration_path, correction_hz)
+            correction_hz = calibrated
+        keyer = KeyerWeb(keyer_cfg["url"], keyer_cfg["apikey"], correction_hz)
+    session = Session(config, cw, post, call_later, keyer, memories_path, wavelog_ok)
+    session.calibration_path = calibration_path
+    return session
 
 
 class Session:
@@ -338,6 +525,8 @@ class Session:
         self.call_later = call_later
         self.keyer = keyer
         self.memories_path = memories_path
+        self.calibration_path = None    # set by make_session
+        self.labels_have_step = False
         self.memories = load_memories(memories_path) if memories_path else []
         self.wavelog_ok = wavelog_ok
 
@@ -482,6 +671,10 @@ class Session:
             self.freq_index = None
             self.on_freq()
         else:
+            if not self.labels_have_step:
+                # Memory labels made before the first poll show bare indexes, not MHz
+                self.labels_have_step = True
+                self.on_memories()
             if not self.pending_set and time.monotonic() - self.last_tune > self.TUNE_HOLD_S:
                 self.freq_index = index
                 self.on_freq()
@@ -494,11 +687,16 @@ class Session:
             return "--- keyer offline"
         return format_mhz(self.keyer.freq_hz(self.freq_index))
 
-    def rx_text(self):
+    def rx_hz(self):
+        """Downlink frequency in Hz, or None (keyer offline or no rx_offset_mhz)."""
         offset = self.config["adif"]["rx_offset_mhz"]
         if self.freq_index is None or not offset:
-            return ""
-        return f"RX {format_mhz(self.keyer.freq_hz(self.freq_index) + offset * 1e6)}"
+            return None
+        return self.keyer.freq_hz(self.freq_index) + offset * 1e6
+
+    def rx_text(self):
+        hz = self.rx_hz()
+        return f"RX {format_mhz(hz)}" if hz else ""
 
     def tune_to_index(self, index):
         if self.freq_index is None:
@@ -556,6 +754,38 @@ class Session:
 
     def memory_labels(self):
         return [self.memory_label(i) for i in self.memories]
+
+    # --- calibration against the SDR ---
+
+    # A bigger difference means the SDR is not tuned to our own signal
+    CALIBRATION_MAX_HZ = 50000
+
+    def calibration_diff(self, sdr_hz):
+        """
+        sdr_hz: where the SDR page is tuned, by hand, to our own carrier. Returns the
+        difference to the computed RX frequency in Hz, or None (status says why).
+        """
+        rx_hz = self.rx_hz()
+        if rx_hz is None:
+            self.set_status("Calibration needs the keyer frequency and adif.rx_offset_mhz")
+            return None
+        if self.calibration_path is None:
+            self.set_status("Calibration: nowhere to save it")
+            return None
+        diff = round(sdr_hz - rx_hz)
+        if abs(diff) > self.CALIBRATION_MAX_HZ:
+            self.set_status(f"Calibration: SDR is {diff / 1e3:+.1f} kHz off - tune it onto your signal")
+            return None
+        return diff
+
+    def apply_calibration(self, diff):
+        """Shift the frequency correction by diff Hz and save it to calibration.json."""
+        self.keyer.correction_hz += diff
+        save_calibration(self.calibration_path, self.keyer.correction_hz)
+        log.info("Calibrated: correction %+d Hz (%+d Hz)", self.keyer.correction_hz, diff)
+        self.set_status(f"Calibrated: correction {self.keyer.correction_hz:+d} Hz ({diff:+d} Hz)")
+        self.on_freq()
+        self.on_memories()
 
     def save_memory(self):
         """Save the current frequency; returns its position in memories or None."""

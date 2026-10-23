@@ -71,7 +71,9 @@ Tuning: `−`/`+` buttons, mouse wheel over the frequency or PgUp/PgDn, with a s
 and press GO/Enter to jump to it. Memories are saved to `memories.json` next to the config.
 
 `keyer_web.correction_hz` corrects the TCXO offset: set it to
-*real frequency (SDR/GPS) − frequency shown with correction 0*.
+*real frequency (SDR/GPS) − frequency shown with correction 0*, or let *Calibrate* measure it
+(see WebSDR below). A calibrated value is saved to `calibration.json` next to the config and
+takes precedence over `correction_hz`; delete the file to go back to the config value.
 
 ## Dots and power
 
@@ -101,3 +103,37 @@ fldigi, so a full character is always readable in one of the copies.
 
 `python3 hellrx.py ../Settings.h out.pgm "TEXT"` decodes a generated
 test signal offline (font read from the keyer firmware).
+
+## WebSDR
+
+A web SDR can run under the client, tuned to the RX frequency (keyer TX + `adif.rx_offset_mhz`)
+and retuned whenever the keyer is tuned (`websdr.follow`). Set `websdr.url` and `websdr.type`:
+
+- `"websdr"`: PA3FWM WebSDR, e.g. the BATC QO-100 NB. Its mobile page
+  `https://eshail.batc.org.uk/nb/m.html` (default) fits the narrow window and the iPad better;
+  `https://eshail.batc.org.uk/nb/` is the full page (1024 px wide)
+- `"openwebrx"`: OpenWebRX / OpenWebRX+, e.g. `https://websdr.iks.tugraz.at/eshail/` (OE6XUG).
+  It only retunes inside the current profile, so pick the QO-100 profile in the page first
+
+`websdr.mode` (`cw`, `usb`, ...) is set when the page opens; after that the mode chosen in the
+page is kept. `websdr.span_khz` (default 10) zooms the waterfall to about that width around the
+frequency on every retune, as close as the SDR's zoom steps allow (BATC mobile in a 712 px window:
+10.6 kHz; OpenWebRX zooms in to about 23-31 kHz at most, depending on its version); `0` leaves
+the zoom alone. `websdr.url: ""` hides the SDR button.
+
+- **Tk:** *WebSDR* opens Chromium / Chrome / Brave as an app window docked under the client
+  (`websdr.height` px high), and it follows when the client is moved. It is driven over the
+  DevTools protocol with its own profile in `~/.cache/pyCWdclient-websdr`. Feld Hell RX hears
+  it via `@DEFAULT_MONITOR@`.
+- **Pythonista:** *SDR* shows the page in the lower part of the screen (at most 55 %); tap into
+  the page once to start the audio. Tapping *SDR* again removes it and stops the audio.
+
+### Calibrating TX against the SDR
+
+The BATC WebSDR is GPS locked, so your own signal on it shows the real TX frequency.
+Open the WebSDR, send DOTS, tune the SDR by hand so your signal sits in the narrow CW filter,
+then press *Calibrate* (Tk) / *Cal* (Pythonista). The client reads the SDR frequency, shows the
+difference to the computed RX and, after you confirm, adds it to the correction. TX and RX then
+agree on the display and in the log; the keyer still tunes in its ≈ 198 Hz steps. The button is
+offered only for WebSDR (PA3FWM) pages, not for OpenWebRX, whose receiver is not known to be
+GPS locked.
