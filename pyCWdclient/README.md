@@ -115,6 +115,10 @@ and retuned whenever the keyer is tuned (`websdr.follow`). Set `websdr.url` and 
 - `"openwebrx"`: OpenWebRX / OpenWebRX+, e.g. `https://websdr.iks.tugraz.at/eshail/` (OE6XUG).
   It only retunes inside the current profile, so pick the QO-100 profile in the page first
 
+**Split** (Tk checkbox, Pythonista button, amber when on) stops the SDR from following: tune it
+by hand to listen elsewhere while the TX stays. Switching Split off brings the SDR back to the TX
+RX frequency. `websdr.follow: false` starts in split.
+
 `websdr.mode` (`cw`, `usb`, ...) is set when the page opens; after that the mode chosen in the
 page is kept. `websdr.span_khz` (default 10) zooms the waterfall to about that width around the
 frequency on every retune, as close as the SDR's zoom steps allow (BATC mobile in a 712 px window:

@@ -43,7 +43,8 @@ DEFAULT_CONFIG = {
     "hell_rx": {"source": "@DEFAULT_MONITOR@", "tone_hz": 1000},
     # Web SDR shown under the controls; type "websdr" (PA3FWM, e.g. BATC; .../m.html = its
     # mobile page) or "openwebrx".
-    # follow = retune the SDR to the RX frequency when the keyer is tuned; url "" = off
+    # follow = retune the SDR to the RX frequency when the keyer is tuned (false = start in
+    # split, the Split button switches it); url "" = off
     # span_khz = zoom the waterfall to about this width around it (0 = leave the zoom alone)
     "websdr": {"url": "https://eshail.batc.org.uk/nb/m.html", "type": "websdr", "mode": "cw",
                "follow": True, "span_khz": 10, "height": 420},
@@ -221,6 +222,13 @@ class WebSdrTuner:
             self.kind = PaWebSdrMobile
         self.last_hz = None
         self.first = False
+        self.follow = websdr_cfg["follow"]     # False = split: the SDR is tuned by hand only
+
+    def set_follow(self, follow):
+        """Split off (follow) retunes the SDR to the TX at the next frequency update."""
+        self.follow = follow
+        if follow:
+            self.last_hz = None
 
     def url(self, hz):
         """URL to open the page with; resets what was sent to the page."""
@@ -232,7 +240,7 @@ class WebSdrTuner:
 
     def tune_js(self, hz):
         """JS to run in the page, or None if nothing changed or following is off."""
-        if hz is None or hz == self.last_hz or not (self.cfg["follow"] or self.first):
+        if hz is None or hz == self.last_hz or not (self.follow or self.first):
             return None
         self.last_hz = hz
         mode = self.cfg["mode"] if self.first and not self.kind.sets_mode_in_url else None

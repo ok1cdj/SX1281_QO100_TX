@@ -240,7 +240,12 @@ class MainView(ui.View):
                                                 action=self.set_mode)
             self.mode_ctl.selected_index = 0
             cal = button("Cal", self.act(self.calibrate)) if self.sdr_tuner and self.sdr_tuner.calibrates() else label("")
-            self.row(ROW_H, (label("Mode"), 1), (self.mode_ctl, 3), (cal, 2), (self.sdr_button(), 2))
+            split = label("")
+            if self.sdr_tuner:
+                split = self.split_btn = button("Split", self.toggle_split)
+                self.show_split()
+            self.row(ROW_H, (label("Mode"), 1), (self.mode_ctl, 3), (cal, 1.5), (split, 1.5),
+                     (self.sdr_button(), 1.5))
         elif self.sdr_tuner:
             self.row(ROW_H, (label(""), 6), (self.sdr_button(), 2))
 
@@ -298,6 +303,21 @@ class MainView(ui.View):
             self.remove_subview(self.sdr)
             self.sdr = None
         self.layout()
+
+    def toggle_split(self, _sender):
+        """Split: tuning the TX does not move the SDR; off: the SDR goes back to the TX."""
+        follow = not self.sdr_tuner.follow
+        self.show_split(follow)
+        self.loop.post(lambda: self._set_split(follow))
+
+    def _set_split(self, follow):
+        self.sdr_tuner.set_follow(follow)
+        self.set_status("SDR follows TX" if follow else "Split - SDR tuned by hand")
+        self.update_freq()
+
+    def show_split(self, follow=None):
+        follow = self.sdr_tuner.follow if follow is None else follow
+        self.split_btn.background_color = "white" if follow else "#ffb300"
 
     def calibrate(self):
         """Loop thread. Transmit (DOTS), tune the SDR by hand onto your signal, then Cal."""

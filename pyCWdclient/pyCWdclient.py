@@ -117,8 +117,11 @@ class App(tk.Tk):
             self.sdr_move_job = None
             tk.Button(self, text="WebSDR", command=self.toggle_websdr).grid(column=6, row=6, sticky="we", **pad)
             if self.keyer and self.sdr_tuner.calibrates():
-                tk.Button(self, text="Calibrate", command=self.calibrate).grid(column=7, row=6, columnspan=2,
-                                                                                sticky="we", **pad)
+                tk.Button(self, text="Calibrate", command=self.calibrate).grid(column=7, row=6, sticky="we", **pad)
+            if self.keyer:
+                self.split_var = tk.BooleanVar(value=not self.sdr_tuner.follow)
+                tk.Checkbutton(self, text="Split", variable=self.split_var, command=self.set_split).grid(
+                    column=8, row=6, sticky="w", **pad)
             self.bind("<Configure>", self._websdr_follow_window)
 
         if self.keyer:
@@ -231,6 +234,12 @@ class App(tk.Tk):
             self.sdr.close()
         else:
             self.sdr.open(self.sdr_tuner.url(self.session.rx_hz()), self._websdr_bounds())
+
+    def set_split(self):
+        """Split: tuning the TX does not move the SDR; off: the SDR goes back to the TX."""
+        self.sdr_tuner.set_follow(not self.split_var.get())
+        self.status_var.set("Split - SDR tuned by hand" if self.split_var.get() else "SDR follows TX")
+        self.update_freq_display()
 
     def calibrate(self):
         """Transmit (DOTS), tune the SDR by hand onto your signal, then Calibrate."""
