@@ -588,6 +588,7 @@ class Session:
         self.memories_path = memories_path
         self.calibration_path = None    # set by make_session
         self.labels_have_step = False
+        self.keyer_error_shown = False
         self.memories = load_memories(memories_path) if memories_path else []
         self.wavelog_ok = wavelog_ok
 
@@ -729,9 +730,14 @@ class Session:
     def _on_poll(self, index, error):
         if error:
             log.debug("Keyer poll failed: %s", error)
+            if not self.keyer_error_shown:
+                # Once per outage, so the reason is visible without a log
+                self.keyer_error_shown = True
+                self.set_status(f"Keyer offline ({self.keyer.url}): {error}")
             self.freq_index = None
             self.on_freq()
         else:
+            self.keyer_error_shown = False
             if not self.labels_have_step:
                 # Memory labels made before the first poll show bare indexes, not MHz
                 self.labels_have_step = True

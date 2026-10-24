@@ -26,7 +26,8 @@ FREQ_H = 64
 PAD = 6
 STOP_COLOR = "#d32f2f"
 SPEED_MIN, SPEED_MAX = 10, 40
-SDR_MAX_FRACTION = 0.55          # the SDR takes at most this part of the screen height
+SDR_MAX_FRACTION = 0.35          # portrait: the SDR takes at most this part of the screen height
+SDR_SIDE_FRACTION = 0.5          # landscape: the SDR is on the right, this part of the width
 
 
 class Loop:
@@ -187,13 +188,18 @@ class MainView(ui.View):
         self.rows.append((height, items))
 
     def layout(self):
-        if self.sdr:
+        if self.sdr and self.width > self.height:
+            # Landscape: SDR next to the controls, nothing is covered
+            sdr_w = self.width * SDR_SIDE_FRACTION
+            self.scroll.frame = (0, 0, self.width - sdr_w, self.height)
+            self.sdr.frame = (self.width - sdr_w, 0, sdr_w, self.height)
+        elif self.sdr:
             sdr_h = min(self.config["websdr"]["height"], self.height * SDR_MAX_FRACTION)
             self.scroll.frame = (0, 0, self.width, self.height - sdr_h)
             self.sdr.frame = (0, self.height - sdr_h, self.width, sdr_h)
         else:
             self.scroll.frame = self.bounds
-        width = self.width - 2 * PAD
+        width = self.scroll.width - 2 * PAD
         y = PAD
         for height, items in self.rows:
             total = sum(weight for _, weight in items)
@@ -204,7 +210,7 @@ class MainView(ui.View):
                 view.frame = (x, y, w, height)
                 x += w + PAD
             y += height + PAD
-        self.scroll.content_size = (self.width, y)
+        self.scroll.content_size = (self.scroll.width, y)
 
     def act(self, func):
         """Button action that runs func in the loop thread."""

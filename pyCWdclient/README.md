@@ -132,7 +132,8 @@ the zoom alone. `websdr.url: ""` hides the SDR button.
   (`websdr.height` px high), and it follows when the client is moved. It is driven over the
   DevTools protocol with its own profile in `~/.cache/pyCWdclient-websdr`. Feld Hell RX hears
   it via `@DEFAULT_MONITOR@`.
-- **Pythonista:** *SDR* shows the page in the lower part of the screen (at most 55 %); tap into
+- **Pythonista:** *SDR* shows the page next to the controls in landscape, or in the lower part
+  of the screen in portrait (at most 35 %); tap into
   the page once to start the audio. Tapping *SDR* again removes it and stops the audio.
 
 ### Calibrating TX against the SDR
