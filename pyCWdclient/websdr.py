@@ -181,6 +181,11 @@ class WebSdrWindow:
             self.jobs = None
         if self.is_open():
             self.proc.terminate()
+            try:
+                # Until it has exited, a new browser with the same profile would hand over to it
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
         self.proc = None
 
     # --- worker thread ---

@@ -167,7 +167,9 @@ class MainView(ui.View):
         # Web SDR under the controls while the SDR button is on
         self.sdr = None
         self.sdr_loaded = False
-        self.sdr_tuner = WebSdrTuner(config["websdr"]) if config["websdr"]["url"] else None
+        self.sdr_tuner = None
+        if config["websdr"]["url"] or config["websdr"]["sdrs"]:
+            self.sdr_tuner = WebSdrTuner(config["websdr"], Path(memories_path).with_name("sdr.json"))
         self._build()
 
         self.session.on_status = self.set_status
@@ -239,15 +241,21 @@ class MainView(ui.View):
             self.mode_ctl = ui.SegmentedControl(segments=[Session.MODE_LABELS[m] for m in Session.MODES],
                                                 action=self.set_mode)
             self.mode_ctl.selected_index = 0
-            cal = button("Cal", self.act(self.calibrate)) if self.sdr_tuner and self.sdr_tuner.calibrates() else label("")
-            split = label("")
+            cal = split = self.cal_btn = label("")
             if self.sdr_tuner:
+                cal = self.cal_btn = button("Cal", self.act(self.calibrate))
                 split = self.split_btn = button("Split", self.toggle_split)
                 self.show_split()
             self.row(ROW_H, (label("Mode"), 1), (self.mode_ctl, 3), (cal, 1.5), (split, 1.5),
                      (self.sdr_button(), 1.5))
         elif self.sdr_tuner:
+            self.cal_btn = None
             self.row(ROW_H, (label(""), 6), (self.sdr_button(), 2))
+        if self.sdr_tuner and len(self.sdr_tuner.names()) > 1:
+            self.sdr_ctl = ui.SegmentedControl(segments=self.sdr_tuner.names(), action=self.select_sdr)
+            self.sdr_ctl.selected_index = self.sdr_tuner.names().index(self.sdr_tuner.sdr["name"])
+            self.row(ROW_H, (label("SDR"), 1), (self.sdr_ctl, 7))
+        self.show_calibrate()
 
         self.row(ROW_H,
                  (button("CQ", act(lambda: self.macro("cq"))), 1),
@@ -303,6 +311,23 @@ class MainView(ui.View):
             self.remove_subview(self.sdr)
             self.sdr = None
         self.layout()
+
+    def select_sdr(self, sender):
+        name = sender.segments[sender.selected_index]
+        self.loop.post(lambda: self._select_sdr(name))
+
+    def _select_sdr(self, name):
+        self.sdr_tuner.select(name)
+        self.show_calibrate()
+        sdr = self.sdr
+        if sdr:
+            self.sdr_loaded = False
+            sdr.load_url(self.sdr_tuner.url(self.session.rx_hz()))
+
+    def show_calibrate(self):
+        # Only GPS locked SDRs (BATC) are good for calibration
+        if self.sdr_tuner and isinstance(self.cal_btn, ui.Button):
+            self.cal_btn.enabled = self.sdr_tuner.calibrates()
 
     def toggle_split(self, _sender):
         """Split: tuning the TX does not move the SDR; off: the SDR goes back to the TX."""

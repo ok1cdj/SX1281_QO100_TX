@@ -107,7 +107,10 @@ test signal offline (font read from the keyer firmware).
 ## WebSDR
 
 A web SDR can run under the client, tuned to the RX frequency (keyer TX + `adif.rx_offset_mhz`)
-and retuned whenever the keyer is tuned (`websdr.follow`). Set `websdr.url` and `websdr.type`:
+and retuned whenever the keyer is tuned (`websdr.follow`). The SDR is picked in the app (Tk:
+the list next to *WebSDR*, Pythonista: the *SDR* row) from `websdr.sdrs` (name, url, type); the
+choice is kept in `sdr.json` next to the config. `websdr.url` / `websdr.type` is the first
+choice. Types:
 
 - `"websdr"`: PA3FWM WebSDR, e.g. the BATC QO-100 NB. Its mobile page
   `https://eshail.batc.org.uk/nb/m.html` (default) fits the narrow window and the iPad better;

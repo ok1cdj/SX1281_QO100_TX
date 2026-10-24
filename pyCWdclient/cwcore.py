@@ -46,8 +46,15 @@ DEFAULT_CONFIG = {
     # follow = retune the SDR to the RX frequency when the keyer is tuned (false = start in
     # split, the Split button switches it); url "" = off
     # span_khz = zoom the waterfall to about this width around it (0 = leave the zoom alone)
+    # sdrs = the choice offered in the app (the last one picked is kept in sdr.json); url/type
+    # above is the first choice, added as "Config" if it is not in the list
     "websdr": {"url": "https://eshail.batc.org.uk/nb/m.html", "type": "websdr", "mode": "cw",
-               "follow": True, "span_khz": 10, "height": 420},
+               "follow": True, "span_khz": 10, "height": 420,
+               "sdrs": [
+                   {"name": "BATC", "url": "https://eshail.batc.org.uk/nb/m.html", "type": "websdr"},
+                   {"name": "BATC full", "url": "https://eshail.batc.org.uk/nb/", "type": "websdr"},
+                   {"name": "Graz", "url": "https://websdr.iks.tugraz.at/eshail/", "type": "openwebrx"},
+               ]},
     "adif": {
         "band": "13cm",
         "band_rx": "3cm",
@@ -91,8 +98,13 @@ def load_config(path):
         user["wavelog"] = user.pop("cloudlog")
     config = merge(DEFAULT_CONFIG, user)
     config["wavelog"]["url"] = config["wavelog"]["url"].rstrip("/")
-    if config["websdr"]["type"] not in WEB_SDR_TYPES:
-        raise ConfigError(f"websdr.type must be one of {', '.join(WEB_SDR_TYPES)}")
+    sdrs = ([config["websdr"]] if config["websdr"]["url"] else []) + config["websdr"]["sdrs"]
+    for sdr in sdrs:
+        if sdr.get("type") not in WEB_SDR_TYPES:
+            raise ConfigError(f"websdr type {sdr.get('type')!r} ({sdr.get('url')}): "
+                              f"must be one of {', '.join(WEB_SDR_TYPES)}")
+        if not sdr.get("url"):
+            raise ConfigError(f"websdr.sdrs: {sdr.get('name')!r} has no url")
     return config
 
 
@@ -206,6 +218,35 @@ class OpenWebRx:
 WEB_SDR_TYPES = {"websdr": PaWebSdr, "openwebrx": OpenWebRx}
 
 
+def sdr_choices(websdr_cfg):
+    """websdr.sdrs, with websdr.url first (as "Config") if it is not in the list."""
+    sdrs = [dict(sdr, name=sdr.get("name") or sdr["url"]) for sdr in websdr_cfg["sdrs"]]
+    if websdr_cfg["url"]:
+        first = next((sdr for sdr in sdrs if sdr["url"] == websdr_cfg["url"]), None)
+        if first is None:
+            first = {"name": "Config", "url": websdr_cfg["url"], "type": websdr_cfg["type"]}
+        else:
+            sdrs.remove(first)
+        sdrs.insert(0, first)
+    return sdrs
+
+
+def load_sdr_choice(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)["name"]
+    except FileNotFoundError:
+        return None
+    except (ValueError, KeyError, TypeError):
+        log.exception("Invalid SDR choice file %s", path)
+        return None
+
+
+def save_sdr_choice(path, name):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"name": name}, f, indent=2)
+
+
 class WebSdrTuner:
     """
     Builds the SDR URL and the JS that retunes it, once per frequency change.
@@ -215,14 +256,26 @@ class WebSdrTuner:
     With span_khz the waterfall is zoomed to about that width around the frequency.
     """
 
-    def __init__(self, websdr_cfg):
+    def __init__(self, websdr_cfg, state_path=None):
         self.cfg = websdr_cfg
-        self.kind = WEB_SDR_TYPES[websdr_cfg["type"]]
-        if self.kind is PaWebSdr and websdr_cfg["url"].endswith("m.html"):
-            self.kind = PaWebSdrMobile
+        self.state_path = state_path
+        self.sdrs = sdr_choices(websdr_cfg)
         self.last_hz = None
         self.first = False
         self.follow = websdr_cfg["follow"]     # False = split: the SDR is tuned by hand only
+        self.select(load_sdr_choice(state_path) if state_path else None, save=False)
+
+    def names(self):
+        return [sdr["name"] for sdr in self.sdrs]
+
+    def select(self, name, save=True):
+        """Pick the SDR by name (unknown name: the first one); the page has to be reopened."""
+        self.sdr = next((sdr for sdr in self.sdrs if sdr["name"] == name), self.sdrs[0])
+        self.kind = WEB_SDR_TYPES[self.sdr["type"]]
+        if self.kind is PaWebSdr and self.sdr["url"].endswith("m.html"):
+            self.kind = PaWebSdrMobile
+        if save and self.state_path:
+            save_sdr_choice(self.state_path, self.sdr["name"])
 
     def set_follow(self, follow):
         """Split off (follow) retunes the SDR to the TX at the next frequency update."""
@@ -232,7 +285,7 @@ class WebSdrTuner:
 
     def url(self, hz):
         """URL to open the page with; resets what was sent to the page."""
-        url = self.kind.url(self.cfg["url"], hz, self.cfg["mode"])
+        url = self.kind.url(self.sdr["url"], hz, self.cfg["mode"])
         # The page is tuned once more when loaded: the URL cannot do it all (mode, zoom, BATC CW)
         self.first = True
         self.last_hz = None

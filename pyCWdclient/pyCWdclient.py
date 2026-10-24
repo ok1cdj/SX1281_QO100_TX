@@ -31,6 +31,7 @@ class App(tk.Tk):
         # Results from worker threads, handed over to the Tk thread by _dispatch()
         self.results = queue.Queue()
         self.session = make_session(config, self.results.put, self.call_later, memories_path, wavelog_ok)
+        self.sdr_state_path = Path(memories_path).with_name("sdr.json") if memories_path else None
         self.keyer = self.session.keyer
 
         self.title("QO100TX - CW Daemon Client")
@@ -112,12 +113,19 @@ class App(tk.Tk):
         self.sdr = None
         browser = websdr.find_browser()
         if self.session.config["websdr"]["url"] and browser:
-            self.sdr_tuner = WebSdrTuner(self.session.config["websdr"])
+            self.sdr_tuner = WebSdrTuner(self.session.config["websdr"], self.sdr_state_path)
             self.sdr = websdr.WebSdrWindow(browser, lambda text: self.results.put(lambda: self.status_var.set(text)))
             self.sdr_move_job = None
+            self.sdr_choice = ttk.Combobox(self, values=self.sdr_tuner.names(), state="readonly", width=12)
+            self.sdr_choice.set(self.sdr_tuner.sdr["name"])
+            self.sdr_choice.grid(column=4, row=6, columnspan=2, sticky="we", **pad)
+            self.sdr_choice.bind("<<ComboboxSelected>>", lambda e: self.select_sdr())
             tk.Button(self, text="WebSDR", command=self.toggle_websdr).grid(column=6, row=6, sticky="we", **pad)
-            if self.keyer and self.sdr_tuner.calibrates():
-                tk.Button(self, text="Calibrate", command=self.calibrate).grid(column=7, row=6, sticky="we", **pad)
+            self.cal_btn = None
+            if self.keyer:
+                self.cal_btn = tk.Button(self, text="Calibrate", command=self.calibrate)
+                self.cal_btn.grid(column=7, row=6, sticky="we", **pad)
+                self._show_calibrate()
             if self.keyer:
                 self.split_var = tk.BooleanVar(value=not self.sdr_tuner.follow)
                 tk.Checkbutton(self, text="Split", variable=self.split_var, command=self.set_split).grid(
@@ -234,6 +242,18 @@ class App(tk.Tk):
             self.sdr.close()
         else:
             self.sdr.open(self.sdr_tuner.url(self.session.rx_hz()), self._websdr_bounds())
+
+    def select_sdr(self):
+        self.sdr_tuner.select(self.sdr_choice.get())
+        self._show_calibrate()
+        if self.sdr.is_open():
+            self.sdr.close()
+            self.sdr.open(self.sdr_tuner.url(self.session.rx_hz()), self._websdr_bounds())
+
+    def _show_calibrate(self):
+        # Only GPS locked SDRs (BATC) are good for calibration
+        if self.cal_btn:
+            self.cal_btn.config(state="normal" if self.sdr_tuner.calibrates() else "disabled")
 
     def set_split(self):
         """Split: tuning the TX does not move the SDR; off: the SDR goes back to the TX."""

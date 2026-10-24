@@ -32,7 +32,12 @@
     "mode": "cw",
     "follow": true,
     "span_khz": 10,
-    "height": 420
+    "height": 420,
+    "sdrs": [
+      {"name": "BATC", "url": "https://eshail.batc.org.uk/nb/m.html", "type": "websdr"},
+      {"name": "BATC full", "url": "https://eshail.batc.org.uk/nb/", "type": "websdr"},
+      {"name": "Graz", "url": "https://websdr.iks.tugraz.at/eshail/", "type": "openwebrx"}
+    ]
   },
   "adif": {
     "band": "13cm",
